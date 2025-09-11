@@ -4,6 +4,7 @@ import json
 import pandas as pd
 from utils.rag_system import RAGSystem
 from utils.data_visualizer import DataVisualizer
+from utils.state import init_state, init_processors
 import logging
 
 # Configure logging
@@ -12,6 +13,9 @@ logger = logging.getLogger(__name__)
 def show_qa_page():
     st.header("🤖 Q&A System")
     st.markdown("Ask questions about your annual reports using AI-powered search")
+    
+    # Initialize session state safely
+    init_state()
     
     # Check if system is ready
     if not st.session_state.processed_documents:
@@ -22,11 +26,10 @@ def show_qa_page():
         st.warning("Search index not built. Please reprocess your documents.")
         return
     
-    # Initialize systems
-    if 'rag_system' not in st.session_state:
-        st.session_state.rag_system = RAGSystem()
-    if 'visualizer' not in st.session_state:
-        st.session_state.visualizer = DataVisualizer()
+    # Initialize processors including RAG system and visualizer
+    if not init_processors():
+        st.error("Failed to initialize Q&A system components")
+        return
     
     # Check API key
     openai_key = os.getenv("OPENAI_API_KEY")

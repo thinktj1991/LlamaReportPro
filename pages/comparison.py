@@ -5,6 +5,7 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 from utils.company_comparator import CompanyComparator
 from utils.data_visualizer import DataVisualizer
+from utils.state import init_state, init_processors
 import logging
 
 # Configure logging
@@ -14,6 +15,9 @@ def show_comparison_page():
     st.header("🔄 Company Comparison")
     st.markdown("Compare financial metrics and performance across different companies")
     
+    # Initialize session state safely
+    init_state()
+    
     if not st.session_state.company_data:
         st.warning("No company data available. Please process documents first in 'Upload & Process'.")
         return
@@ -22,11 +26,10 @@ def show_comparison_page():
         st.warning("Need at least 2 companies for comparison. Please upload more annual reports.")
         return
     
-    # Initialize comparator
-    if 'company_comparator' not in st.session_state:
-        st.session_state.company_comparator = CompanyComparator()
-    if 'visualizer' not in st.session_state:
-        st.session_state.visualizer = DataVisualizer()
+    # Initialize processors including comparator and visualizer
+    if not init_processors():
+        st.error("Failed to initialize comparison components")
+        return
     
     # Company selection and comparison setup
     show_comparison_setup()

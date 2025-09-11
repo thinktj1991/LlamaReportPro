@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 from pathlib import Path
+from utils.state import init_state, get_processing_stats
 
 # Set page configuration
 st.set_page_config(
@@ -11,14 +12,7 @@ st.set_page_config(
 )
 
 # Initialize session state
-if 'processed_documents' not in st.session_state:
-    st.session_state.processed_documents = {}
-if 'extracted_tables' not in st.session_state:
-    st.session_state.extracted_tables = {}
-if 'rag_index' not in st.session_state:
-    st.session_state.rag_index = None
-if 'company_data' not in st.session_state:
-    st.session_state.company_data = {}
+init_state()
 
 def main():
     st.title("📊 Annual Report Analysis System")
@@ -76,27 +70,21 @@ def show_home_page():
     st.subheader("📋 System Status")
     col1, col2, col3, col4 = st.columns(4)
     
+    # Get processing stats safely
+    stats = get_processing_stats()
+    
     with col1:
-        st.metric(
-            "Processed Documents", 
-            len(st.session_state.processed_documents)
-        )
+        st.metric("Processed Documents", stats['documents_count'])
     
     with col2:
-        st.metric(
-            "Extracted Tables", 
-            sum(len(tables) for tables in st.session_state.extracted_tables.values())
-        )
+        st.metric("Extracted Tables", stats['tables_count'])
     
     with col3:
-        rag_status = "Active" if st.session_state.rag_index else "Inactive"
+        rag_status = "Active" if stats['rag_ready'] else "Inactive"
         st.metric("RAG System", rag_status)
     
     with col4:
-        st.metric(
-            "Companies", 
-            len(st.session_state.company_data)
-        )
+        st.metric("Companies", stats['companies_count'])
     
     # API Key status
     st.subheader("🔑 Configuration Status")

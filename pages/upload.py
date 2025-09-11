@@ -4,6 +4,7 @@ from utils.pdf_processor import PDFProcessor
 from utils.table_extractor import TableExtractor
 from utils.rag_system import RAGSystem
 from utils.company_comparator import CompanyComparator
+from utils.state import init_state, init_processors, get_processing_stats, clear_all_data
 import logging
 
 # Configure logging
@@ -13,19 +14,12 @@ def show_upload_page():
     st.header("📁 Upload & Process Documents")
     st.markdown("Upload annual reports and other financial documents for analysis")
     
-    try:
-        # Initialize processors
-        if 'pdf_processor' not in st.session_state:
-            st.session_state.pdf_processor = PDFProcessor()
-        if 'table_extractor' not in st.session_state:
-            st.session_state.table_extractor = TableExtractor()
-        if 'rag_system' not in st.session_state:
-            st.session_state.rag_system = RAGSystem()
-        if 'company_comparator' not in st.session_state:
-            st.session_state.company_comparator = CompanyComparator()
-    except Exception as e:
-        st.error(f"Error initializing upload page components: {str(e)}")
-        logger.error(f"Error initializing upload page: {str(e)}")
+    # Initialize session state safely
+    init_state()
+    
+    # Initialize processors
+    if not init_processors():
+        st.error("Failed to initialize processing components")
         return
     
     # File upload section
@@ -131,23 +125,23 @@ def show_processing_status():
     """
     st.subheader("📊 Processing Status")
     
+    # Get processing stats safely
+    stats = get_processing_stats()
+    
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        doc_count = len(st.session_state.processed_documents)
-        st.metric("Documents Processed", doc_count)
+        st.metric("Documents Processed", stats['documents_count'])
     
     with col2:
-        table_count = sum(len(tables) for tables in st.session_state.extracted_tables.values())
-        st.metric("Tables Extracted", table_count)
+        st.metric("Tables Extracted", stats['tables_count'])
     
     with col3:
-        rag_status = "✅ Ready" if st.session_state.rag_index else "❌ Not Built"
+        rag_status = "✅ Ready" if stats['rag_ready'] else "❌ Not Built"
         st.metric("Search Index", rag_status)
     
     with col4:
-        company_count = len(st.session_state.company_data)
-        st.metric("Companies Identified", company_count)
+        st.metric("Companies Identified", stats['companies_count'])
 
 def show_processing_summary():
     """
@@ -204,24 +198,14 @@ def show_document_management():
     
     with col2:
         if st.button("🗑️ Clear All Data", type="secondary", use_container_width=True):
-            clear_all_data()
+            clear_all_data_local()
 
-def clear_all_data():
+def clear_all_data_local():
     """
-    Clear all processed data
+    Clear all processed data using the centralized function
     """
     try:
-        # Clear session state
-        st.session_state.processed_documents = {}
-        st.session_state.extracted_tables = {}
-        st.session_state.rag_index = None
-        st.session_state.company_data = {}
-        
-        # Reset RAG system
-        if hasattr(st.session_state, 'rag_system'):
-            st.session_state.rag_system.index = None
-            st.session_state.rag_system.query_engine = None
-        
+        clear_all_data()
         st.success("All data cleared successfully!")
         st.rerun()
         

@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from utils.data_visualizer import DataVisualizer
 from utils.table_extractor import TableExtractor
+from utils.state import init_state, init_processors
 import logging
 
 # Configure logging
@@ -12,13 +13,17 @@ def show_analysis_page():
     st.header("📊 Data Analysis")
     st.markdown("Explore and analyze extracted content from your documents")
     
+    # Initialize session state safely
+    init_state()
+    
     if not st.session_state.processed_documents:
         st.warning("No documents processed yet. Please go to 'Upload & Process' to upload documents first.")
         return
     
-    # Initialize visualizer
-    if 'visualizer' not in st.session_state:
-        st.session_state.visualizer = DataVisualizer()
+    # Initialize processors including visualizer
+    if not init_processors():
+        st.error("Failed to initialize analysis components")
+        return
     
     # Sidebar for analysis options
     st.sidebar.subheader("Analysis Options")
@@ -127,9 +132,10 @@ def show_financial_metrics():
     """
     st.subheader("💰 Financial Metrics Analysis")
     
-    # Create consolidated table
-    if 'table_extractor' not in st.session_state:
-        st.session_state.table_extractor = TableExtractor()
+    # Ensure processors are initialized
+    if not init_processors():
+        st.error("Failed to initialize table extractor")
+        return
     
     # Get important financial tables
     important_tables = st.session_state.table_extractor.get_important_tables(
