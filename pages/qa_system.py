@@ -364,3 +364,7 @@ def export_query_history():
             file_name="query_history.json",
             mime="application/json"
         )
+
+# Main execution for Streamlit multipage
+if __name__ == "__main__":
+    show_qa_page()

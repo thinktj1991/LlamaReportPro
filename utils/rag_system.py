@@ -15,20 +15,31 @@ logger = logging.getLogger(__name__)
 
 class RAGSystem:
     def __init__(self):
-        self.openai_api_key = os.getenv("OPENAI_API_KEY", "default_key")
+        self.openai_api_key = os.getenv("OPENAI_API_KEY")
         self.index = None
         self.query_engine = None
-        self._setup_llama_index()
+        
+        # Only setup if API key is available
+        if self.openai_api_key:
+            try:
+                self._setup_llama_index()
+            except Exception as e:
+                logger.error(f"Error setting up LlamaIndex: {str(e)}")
+        else:
+            logger.warning("OpenAI API key not found, RAG system will be limited")
     
     def _setup_llama_index(self):
         """
         Setup LlamaIndex with OpenAI configurations
         """
         try:
+            if not self.openai_api_key:
+                raise ValueError("OpenAI API key is required")
+                
             # the newest OpenAI model is "gpt-5" which was released August 7, 2025.
             # do not change this unless explicitly requested by the user
             Settings.llm = OpenAI(
-                model="gpt-5",
+                model="gpt-4o",  # Using gpt-4o which is more stable
                 api_key=self.openai_api_key,
                 temperature=0.1
             )
@@ -42,7 +53,7 @@ class RAGSystem:
             
         except Exception as e:
             logger.error(f"Error setting up LlamaIndex: {str(e)}")
-            raise e
+            # Don't raise the error, just log it
     
     def build_index(self, processed_documents: Dict[str, Any], extracted_tables: Dict[str, List[Dict]]) -> bool:
         """

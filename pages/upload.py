@@ -13,15 +13,20 @@ def show_upload_page():
     st.header("📁 Upload & Process Documents")
     st.markdown("Upload annual reports and other financial documents for analysis")
     
-    # Initialize processors
-    if 'pdf_processor' not in st.session_state:
-        st.session_state.pdf_processor = PDFProcessor()
-    if 'table_extractor' not in st.session_state:
-        st.session_state.table_extractor = TableExtractor()
-    if 'rag_system' not in st.session_state:
-        st.session_state.rag_system = RAGSystem()
-    if 'company_comparator' not in st.session_state:
-        st.session_state.company_comparator = CompanyComparator()
+    try:
+        # Initialize processors
+        if 'pdf_processor' not in st.session_state:
+            st.session_state.pdf_processor = PDFProcessor()
+        if 'table_extractor' not in st.session_state:
+            st.session_state.table_extractor = TableExtractor()
+        if 'rag_system' not in st.session_state:
+            st.session_state.rag_system = RAGSystem()
+        if 'company_comparator' not in st.session_state:
+            st.session_state.company_comparator = CompanyComparator()
+    except Exception as e:
+        st.error(f"Error initializing upload page components: {str(e)}")
+        logger.error(f"Error initializing upload page: {str(e)}")
+        return
     
     # File upload section
     st.subheader("📤 Upload Documents")
@@ -245,3 +250,7 @@ def validate_pdf_file(uploaded_file) -> bool:
     except Exception as e:
         logger.error(f"Error validating file {uploaded_file.name}: {str(e)}")
         return False
+
+# Main execution for Streamlit multipage
+if __name__ == "__main__":
+    show_upload_page()

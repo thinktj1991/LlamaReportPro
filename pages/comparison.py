@@ -521,3 +521,7 @@ def identify_best_practices(selected_data):
     except Exception as e:
         logger.error(f"Error identifying best practices: {str(e)}")
         st.error("Error identifying best practices")
+
+# Main execution for Streamlit multipage
+if __name__ == "__main__":
+    show_comparison_page()

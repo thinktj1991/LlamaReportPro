@@ -381,6 +381,10 @@ def show_document_statistics(doc_data):
             st.subheader("📋 Page-by-Page Statistics")
             st.dataframe(df_stats, use_container_width=True)
 
+# Main execution for Streamlit multipage
+if __name__ == "__main__":
+    show_analysis_page()
+
 def show_processing_statistics():
     """
     Show overall processing statistics
