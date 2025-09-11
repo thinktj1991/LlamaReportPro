@@ -153,13 +153,25 @@ class TableExtractor:
         Determine if a table contains financial data
         """
         try:
+            # Validate DataFrame is not empty
+            if df.empty or len(df.columns) == 0:
+                return False
+            
             # Check column names and content for financial keywords
             text_to_check = ' '.join(df.columns.astype(str)).lower()
             
             # Add some cell content for checking
             sample_cells = []
             for col in df.columns[:3]:  # Check first 3 columns
-                sample_cells.extend(df[col].astype(str).head(5).tolist())
+                try:
+                    # Safely get column data as Series
+                    col_series = df[col]
+                    if not col_series.empty:
+                        sample_data = col_series.astype(str).head(5).values.tolist()
+                        sample_cells.extend(sample_data)
+                except Exception as e:
+                    logger.warning(f"Error processing column {col}: {str(e)}")
+                    continue
             
             text_to_check += ' ' + ' '.join(sample_cells).lower()
             
@@ -167,7 +179,15 @@ class TableExtractor:
             financial_score = sum(1 for keyword in self.financial_keywords if keyword in text_to_check)
             
             # Check for numeric data (financial tables usually have numbers)
-            numeric_cols = len([col for col in df.columns if df[col].dtype in ['int64', 'float64']])
+            numeric_cols = 0
+            for col in df.columns:
+                try:
+                    col_series = df[col]
+                    if pd.api.types.is_numeric_dtype(col_series):
+                        numeric_cols += 1
+                except Exception as e:
+                    logger.warning(f"Error checking dtype for column {col}: {str(e)}")
+                    continue
             
             # Check for currency symbols or number patterns
             currency_pattern = r'[\$¥€£]\s*[\d,.]+'
@@ -219,6 +239,10 @@ class TableExtractor:
         Generate a summary description of the table
         """
         try:
+            # Validate DataFrame is not empty
+            if df.empty or len(df.columns) == 0:
+                return "Empty table"
+            
             summary_parts = []
             
             # Basic info
@@ -227,8 +251,17 @@ class TableExtractor:
             if is_financial:
                 summary_parts.append("Financial data")
             
-            # Column types
-            numeric_cols = len([col for col in df.columns if df[col].dtype in ['int64', 'float64']])
+            # Column types - safely check numeric columns
+            numeric_cols = 0
+            for col in df.columns:
+                try:
+                    col_series = df[col]
+                    if pd.api.types.is_numeric_dtype(col_series):
+                        numeric_cols += 1
+                except Exception as e:
+                    logger.warning(f"Error checking column type for {col}: {str(e)}")
+                    continue
+            
             if numeric_cols > 0:
                 summary_parts.append(f"{numeric_cols} numeric columns")
             
