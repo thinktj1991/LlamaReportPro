@@ -26,43 +26,43 @@ def show_insights_page():
     Main insights analysis page
     """
     try:
-        st.header("🤖 AI-Powered Insights & Analysis")
-        st.markdown("Advanced pattern recognition, anomaly detection, and automated intelligence")
+        st.header("🤖 AI智能洞察与分析")
+        st.markdown("高级模式识别、异常检测和自动化智能分析")
         
         # Initialize session state safely
         init_state()
         
         if not st.session_state.company_data:
-            st.warning("No company data available. Please process documents first in 'Upload & Process'.")
-            st.info("Once you have company data, this page will provide:")
+            st.warning("没有可用的公司数据。请先在“上传与处理”页面处理文档。")
+            st.info("当您有公司数据后，此页面将提供：")
             st.markdown("""
-            - 🔍 **Anomaly Detection**: ML-powered identification of unusual financial patterns
-            - ⚠️ **Risk Analysis**: Systematic assessment of financial risks and red flags  
-            - 🤖 **AI Insights**: Automated generation of business intelligence
-            - 📊 **Pattern Recognition**: Advanced trend and relationship analysis
-            - 📈 **Time-Series Forecasting**: ARIMA modeling and growth prediction
+            - 🔍 **异常检测**: 基于机器学习的不寻常财务模式识别
+            - ⚠️ **风险分析**: 系统性的财务风险和预警信号评估  
+            - 🤖 **AI洞察**: 自动化商业智能生成
+            - 📊 **模式识别**: 高级趋势和关系分析
+            - 📈 **时间序列预测**: ARIMA建模和增长预测
             """)
             
             # Show preview tabs even without data for better UX
             tab1, tab2, tab3, tab4, tab5 = st.tabs([
-                "🔍 Anomaly Detection", "⚠️ Risk Analysis", 
-                "🤖 AI Insights", "📊 Pattern Analysis", "📈 Time-Series Forecasting"
+                "🔍 异常检测", "⚠️ 风险分析", 
+                "🤖 AI洞察", "📊 模式分析", "📈 时间序列预测"
             ])
             
             with tab1:
-                st.info("**🔍 Anomaly Detection Preview**\n\nML-powered identification of unusual financial patterns using Isolation Forest algorithm.")
+                st.info("**🔍 异常检测预览**\n\n使用孤立森林算法的基于机器学习的不寻常财务模式识别。")
             
             with tab2:
-                st.info("**⚠️ Risk Analysis Preview**\n\nSystematic assessment of financial risks including liquidity crisis, excessive leverage, and operational inefficiency patterns.")
+                st.info("**⚠️ 风险分析预览**\n\n系统性的财务风险评估，包括流动性危机、过度杠杆和运营效率低下模式。")
             
             with tab3:
-                st.info("**🤖 AI Insights Preview**\n\nAutomated generation of business intelligence combining performance, risk, anomaly, and comparative analysis.")
+                st.info("**🤖 AI洞察预览**\n\n自动生成综合性能、风险、异常和对比分析的商业智能。")
             
             with tab4:
-                st.info("**📊 Pattern Analysis Preview**\n\nAdvanced pattern recognition and trend analysis with forecasting signals.")
+                st.info("**📊 模式分析预览**\n\n高级模式识别和趋勿分析，包含预测信号。")
             
             with tab5:
-                st.info("**📈 Forecasting Preview**\n\nAdvanced time-series forecasting with ARIMA models, scenario analysis, and growth projections.")
+                st.info("**📈 预测预览**\n\n使用ARIMA模型的高级时间序列预测、情景分析和增长预测。")
             
             return
         
@@ -80,8 +80,8 @@ def show_insights_page():
         
         # Main content tabs
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "🔍 Anomaly Detection", "⚠️ Risk Analysis", 
-            "🤖 AI Insights", "📊 Pattern Analysis", "📈 Time-Series Forecasting"
+            "🔍 异常检测", "⚠️ 风险分析", 
+            "🤖 AI洞察", "📊 模式分析", "📈 时间序列预测"
         ])
         
         with tab1:

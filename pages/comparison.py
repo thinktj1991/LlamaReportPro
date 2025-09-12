@@ -14,23 +14,23 @@ import logging
 logger = logging.getLogger(__name__)
 
 def show_comparison_page():
-    st.header("🔄 Company Comparison")
-    st.markdown("Compare financial metrics and performance across different companies")
+    st.header("🔄 公司对比")
+    st.markdown("对比不同公司的财务指标和绩效表现")
     
     # Initialize session state safely
     init_state()
     
     if not st.session_state.company_data:
-        st.warning("No company data available. Please process documents first in 'Upload & Process'.")
+        st.warning("没有可用的公司数据。请先在“上传与处理”页面处理文档。")
         return
     
     if len(st.session_state.company_data) < 2:
-        st.warning("Need at least 2 companies for comparison. Please upload more annual reports.")
+        st.warning("需要至少两家公司进行对比。请上传更多年报。")
         return
     
     # Initialize processors including comparator and visualizer
     if not init_processors():
-        st.error("Failed to initialize comparison components")
+        st.error("初始化对比组件失败")
         return
     
     # Company selection and comparison setup
@@ -42,8 +42,8 @@ def show_comparison_page():
 
     # Main comparison content - Enhanced with industry analytics
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📊 Overview", "📈 Metrics", "📋 Data Table", 
-        "🔍 Insights", "🏆 Rankings", "🏭 Industry Benchmarks"
+        "📊 概览", "📈 指标", "📋 数据表", 
+        "🔍 洞察", "🏆 排名", "🏭 行业基准"
     ])
     
     with tab1:

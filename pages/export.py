@@ -22,8 +22,8 @@ def show_export_page():
     Main export page
     """
     try:
-        st.header("📁 Data Export Center")
-        st.markdown("Centralized export hub for all analysis results and reports")
+        st.header("📁 数据导出中心")
+        st.markdown("所有分析结果和报告的集中导出中心")
         
         # Initialize session state
         init_state()
@@ -42,27 +42,27 @@ def show_export_page():
         )
         
         if not has_any_data:
-            st.warning("⚠️ No analysis data available for export")
+            st.warning("⚠️ 没有可用于导出的分析数据")
             st.info("""
-            **To enable data export, please:**
+            **要启用数据导出，请：**
             
-            1. 📄 **Upload & Process** documents in the Upload & Process page
-            2. 📊 **Generate Analysis** using the various analysis modules
-            3. 🔍 **Run Comparisons** in the Company Comparison page
-            4. 📈 **Create Forecasts** in the AI Insights forecasting tab
+            1. 📄 **上传与处理** 在上传与处理页面上传文档
+            2. 📊 **生成分析** 使用各种分析模块
+            3. 🔍 **运行对比** 在公司对比页面进行对比
+            4. 📈 **创建AI预测** 在AI洞察页面的预测标签中生成预测
             
-            Once you have analysis results, return here to export your data in multiple formats.
+            一旦您有了分析结果，请返回此处以多种格式导出您的数据。
             """)
             
             # Show capabilities preview
-            st.subheader("📋 Export Capabilities")
+            st.subheader("📋 导出功能")
             
             col1, col2 = st.columns(2)
             
             with col1:
                 st.info("""
-                **📊 Supported Formats:**
-                - **CSV**: Raw data and calculations
+                **📊 支持的格式：**
+                - **CSV**: 原始数据和计算结果
                 - **Excel**: Formatted workbooks with multiple sheets
                 - **PDF**: Professional analysis reports
                 """)

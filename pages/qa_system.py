@@ -11,30 +11,30 @@ import logging
 logger = logging.getLogger(__name__)
 
 def show_qa_page():
-    st.header("🤖 Q&A System")
-    st.markdown("Ask questions about your annual reports using AI-powered search")
+    st.header("🤖 问答系统")
+    st.markdown("使用AI智能搜索对您的年报提问")
     
     # Initialize session state safely
     init_state()
     
     # Check if system is ready
     if not st.session_state.processed_documents:
-        st.warning("No documents processed yet. Please go to 'Upload & Process' to upload documents first.")
+        st.warning("尚未处理任何文档。请先在“上传与处理”页面上传文档。")
         return
     
     if not st.session_state.rag_index:
-        st.warning("Search index not built. Please reprocess your documents.")
+        st.warning("搜索索引尚未构建。请重新处理您的文档。")
         return
     
     # Initialize processors including RAG system and visualizer
     if not init_processors():
-        st.error("Failed to initialize Q&A system components")
+        st.error("初始化问答系统组件失败")
         return
     
     # Check API key
     openai_key = os.getenv("OPENAI_API_KEY")
     if not openai_key or openai_key == "default_key":
-        st.error("🔑 OpenAI API Key not configured. Please set the OPENAI_API_KEY environment variable.")
+        st.error("🔑 OpenAI API密钥未配置。请设置OPENAI_API_KEY环境变量。")
         return
     
     # System status
@@ -53,7 +53,7 @@ def show_system_status():
     """
     Display RAG system status
     """
-    st.subheader("🔍 System Status")
+    st.subheader("🔍 系统状态")
     
     try:
         # Get index statistics
@@ -62,7 +62,7 @@ def show_system_status():
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("Index Status", index_stats.get('status', 'Unknown'))
+            st.metric("索引状态", index_stats.get('status', '未知'))
         
         with col2:
             st.metric("Total Documents", index_stats.get('total_documents', 0))

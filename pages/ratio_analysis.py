@@ -12,13 +12,13 @@ logger = logging.getLogger(__name__)
 
 def show_ratio_analysis_page():
     try:
-        st.header("📊 Financial Ratio Analysis")
-        st.markdown("Advanced financial ratio calculations and trend analysis")
+        st.header("📊 财务比率分析")
+        st.markdown("高级财务比率计算和趋势分析")
         
         # Initialize session state safely with error handling
         state_initialized = init_state()
         if not state_initialized:
-            st.error("Failed to initialize session state. Some features may not work correctly.")
+            st.error("初始化会话状态失败。一些功能可能无法正常工作。")
             # Continue with limited functionality
         
         # Ensure company_data exists with fallback
@@ -27,8 +27,8 @@ def show_ratio_analysis_page():
         
         # Check for company data
         if not st.session_state.company_data:
-            st.warning("No company data available. Please process documents first in 'Upload & Process'.")
-            st.info("You can still view the ratio library and learn about financial ratios in the '📋 Ratio Library' tab.")
+            st.warning("没有可用的公司数据。请先在“上传与处理”页面处理文档。")
+            st.info("您仍然可以在“📋 比率库”标签中查看比率库并了解财务比率。")
         
         # Initialize financial calculator with error handling
         try:
@@ -36,39 +36,39 @@ def show_ratio_analysis_page():
                 st.session_state.financial_calculator = FinancialCalculator()
         except Exception as e:
             logger.error(f"Error initializing financial calculator: {str(e)}")
-            st.error(f"Error initializing financial calculator: {str(e)}")
+            st.error(f"初始化财务计算器错误：{str(e)}")
             st.session_state.financial_calculator = None
         
         # Main content tabs - always show them
-        tab1, tab2, tab3, tab4 = st.tabs(["🧮 Ratio Calculator", "📈 Trend Analysis", "🏢 Company Comparison", "📋 Ratio Library"])
+        tab1, tab2, tab3, tab4 = st.tabs(["🧮 比率计算器", "📈 趋势分析", "🏢 公司对比", "📋 比率库"])
         
         with tab1:
             try:
                 show_ratio_calculator()
             except Exception as e:
                 logger.error(f"Error in ratio calculator: {str(e)}")
-                st.error(f"Error loading ratio calculator: {str(e)}")
+                st.error(f"加载比率计算器错误：{str(e)}")
         
         with tab2:
             try:
                 show_trend_analysis()
             except Exception as e:
                 logger.error(f"Error in trend analysis: {str(e)}")
-                st.error(f"Error loading trend analysis: {str(e)}")
+                st.error(f"加载趋势分析错误：{str(e)}")
         
         with tab3:
             try:
                 show_ratio_comparison()
             except Exception as e:
                 logger.error(f"Error in ratio comparison: {str(e)}")
-                st.error(f"Error loading ratio comparison: {str(e)}")
+                st.error(f"加载比率对比错误：{str(e)}")
         
         with tab4:
             try:
                 show_ratio_library()
             except Exception as e:
                 logger.error(f"Error in ratio library: {str(e)}")
-                st.error(f"Error loading ratio library: {str(e)}")
+                st.error(f"加载比率库错误：{str(e)}")
         
         # Add export functionality for calculated ratios
         if hasattr(st.session_state, 'calculated_ratios') and st.session_state.calculated_ratios:
@@ -77,7 +77,7 @@ def show_ratio_analysis_page():
                 
     except Exception as e:
         logger.error(f"Critical error in ratio analysis page: {str(e)}")
-        st.error("Critical error loading the Ratio Analysis page. Please refresh and try again.")
+        st.error("加载比率分析页面时发生严重错误。请刷新页面并重试。")
         st.exception(e)
 
 def show_ratio_calculator():

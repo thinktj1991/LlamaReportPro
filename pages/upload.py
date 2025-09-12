@@ -11,36 +11,36 @@ import logging
 logger = logging.getLogger(__name__)
 
 def show_upload_page():
-    st.header("📁 Upload & Process Documents")
-    st.markdown("Upload annual reports and other financial documents for analysis")
+    st.header("📁 上传与处理文档")
+    st.markdown("上传年报和其他财务文档进行分析")
     
     # Initialize session state safely
     init_state()
     
     # Initialize processors
     if not init_processors():
-        st.error("Failed to initialize processing components")
+        st.error("初始化处理组件失败")
         return
     
     # File upload section
-    st.subheader("📤 Upload Documents")
+    st.subheader("📤 上传文档")
     uploaded_files = st.file_uploader(
-        "Choose PDF files",
+        "选择PDF文件",
         type=['pdf'],
         accept_multiple_files=True,
-        help="Upload annual reports, financial statements, or other PDF documents"
+        help="上传年报、财务报表或其他PDF文档"
     )
     
     if uploaded_files:
         col1, col2 = st.columns([3, 1])
         
         with col1:
-            st.info(f"Selected {len(uploaded_files)} file(s)")
+            st.info(f"已选择 {len(uploaded_files)} 个文件")
             for file in uploaded_files:
-                st.write(f"• {file.name} ({file.size:,} bytes)")
+                st.write(f"• {file.name} ({file.size:,} 字节)")
         
         with col2:
-            process_button = st.button("🚀 Process All Files", type="primary", use_container_width=True)
+            process_button = st.button("🚀 处理所有文件", type="primary", use_container_width=True)
         
         if process_button:
             process_uploaded_files(uploaded_files)
@@ -66,7 +66,7 @@ def process_uploaded_files(uploaded_files):
     
     try:
         # Step 1: Validate all files first
-        status_text.text("🔍 Validating uploaded files...")
+        status_text.text("🔍 正在验证上传的文件...")
         
         for uploaded_file in uploaded_files:
             is_valid, error_message = validate_pdf_file(uploaded_file)
@@ -85,17 +85,17 @@ def process_uploaded_files(uploaded_files):
         
         # If no valid files, stop processing
         if not valid_files:
-            st.error("❌ No valid files to process. Please check the validation errors above and upload valid PDF files.")
+            st.error("❌ 没有有效的文件可以处理。请检查上方的验证错误并上传有效的PDF文件。")
             return
         
         # Step 2: Process only valid files
-        st.info(f"📋 Processing {len(valid_files)} valid file(s) out of {total_files} uploaded...")
+        st.info(f"📋 正在处理 {len(valid_files)} 个有效文件（共上传 {total_files} 个文件）...")
         
         for i, uploaded_file in enumerate(valid_files):
             try:
-                status_text.text(f"Processing {uploaded_file.name}...")
+                status_text.text(f"正在处理 {uploaded_file.name}...")
                 
-                with st.spinner(f"Processing {uploaded_file.name}..."):
+                with st.spinner(f"正在处理 {uploaded_file.name}..."):
                     # Process PDF
                     processed_data = st.session_state.pdf_processor.process_uploaded_file(uploaded_file)
                     
@@ -126,7 +126,7 @@ def process_uploaded_files(uploaded_files):
                     'success': False,
                     'error_message': error_msg
                 })
-                st.warning(f"⚠️ Skipped {uploaded_file.name} due to processing error: {str(file_error)}")
+                st.warning(f"⚠️ 由于处理错误跳过了 {uploaded_file.name}：{str(file_error)}")
             
             # Update progress
             progress = (i + 1) / len(valid_files)
@@ -136,12 +136,12 @@ def process_uploaded_files(uploaded_files):
         successful_files = [r for r in processing_results if r['success']]
         
         if not successful_files:
-            st.error("❌ No files could be processed successfully. Please check the error messages above.")
+            st.error("❌ 没有文件能够成功处理。请检查上方的错误消息。")
             return
         
         # Step 3: Build RAG index for successfully processed files
-        status_text.text("Building search index...")
-        with st.spinner("Building search index..."):
+        status_text.text("正在构建搜索索引...")
+        with st.spinner("正在构建搜索索引..."):
             success = st.session_state.rag_system.build_index(
                 st.session_state.processed_documents,
                 st.session_state.extracted_tables
@@ -151,8 +151,8 @@ def process_uploaded_files(uploaded_files):
                 st.session_state.rag_index = st.session_state.rag_system.index
         
         # Step 4: Prepare company data for comparison
-        status_text.text("Preparing company data...")
-        with st.spinner("Preparing company data..."):
+        status_text.text("正在准备公司数据...")
+        with st.spinner("正在准备公司数据..."):
             company_data = st.session_state.company_comparator.prepare_company_data(
                 st.session_state.processed_documents,
                 st.session_state.extracted_tables
@@ -160,7 +160,7 @@ def process_uploaded_files(uploaded_files):
             st.session_state.company_data = company_data
         
         progress_bar.progress(1.0)
-        status_text.text("✅ Processing complete!")
+        status_text.text("✅ 处理完成！")
         
         # Show final summary
         show_final_processing_summary(validation_results, processing_results)
@@ -173,13 +173,13 @@ def process_uploaded_files(uploaded_files):
         
     except Exception as e:
         logger.error(f"Error processing files: {str(e)}")
-        st.error(f"Error processing files: {str(e)}")
+        st.error(f"处理文件错误：{str(e)}")
 
 def show_processing_status():
     """
     Display current processing status
     """
-    st.subheader("📊 Processing Status")
+    st.subheader("📊 处理状态")
     
     # Get processing stats safely
     stats = get_processing_stats()
@@ -187,17 +187,17 @@ def show_processing_status():
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Documents Processed", stats['documents_count'])
+        st.metric("已处理文档", stats['documents_count'])
     
     with col2:
-        st.metric("Tables Extracted", stats['tables_count'])
+        st.metric("已提取表格", stats['tables_count'])
     
     with col3:
-        rag_status = "✅ Ready" if stats['rag_ready'] else "❌ Not Built"
-        st.metric("Search Index", rag_status)
+        rag_status = "✅ 就绪" if stats['rag_ready'] else "❌ 未构建"
+        st.metric("搜索索引", rag_status)
     
     with col4:
-        st.metric("Companies Identified", stats['companies_count'])
+        st.metric("已识别公司", stats['companies_count'])
 
 def show_processing_summary():
     """
@@ -206,7 +206,7 @@ def show_processing_summary():
     if not st.session_state.processed_documents:
         return
     
-    st.subheader("📋 Processing Summary")
+    st.subheader("📋 处理摘要")
     
     for doc_name, doc_data in st.session_state.processed_documents.items():
         with st.expander(f"📄 {doc_name}"):
@@ -215,27 +215,27 @@ def show_processing_summary():
             
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Pages", stats['page_count'])
+                st.metric("页数", stats['page_count'])
             with col2:
-                st.metric("Text Length", f"{stats['text_length']:,} chars")
+                st.metric("文本长度", f"{stats['text_length']:,} 字符")
             with col3:
-                st.metric("Tables Found", stats['tables_found'])
+                st.metric("发现表格", stats['tables_found'])
             
             # Company information
             company_info = doc_data.get('company_info', {})
             if company_info:
-                st.write("**Company Information:**")
+                st.write("**公司信息：**")
                 for key, value in company_info.items():
                     st.write(f"• {key.title()}: {value}")
             
             # Table details
             doc_tables = st.session_state.extracted_tables.get(doc_name, [])
             if doc_tables:
-                st.write("**Extracted Tables:**")
+                st.write("**已提取表格：**")
                 for table in doc_tables:
-                    financial_badge = "💰 Financial" if table['is_financial'] else "📋 General"
+                    financial_badge = "💰 财务" if table['is_financial'] else "📋 一般"
                     importance = table['importance_score']
-                    st.write(f"• {table['table_id']} - {financial_badge} - Importance: {importance:.2f}")
+                    st.write(f"• {table['table_id']} - {financial_badge} - 重要性：{importance:.2f}")
 
 def show_document_management():
     """
@@ -244,16 +244,16 @@ def show_document_management():
     if not st.session_state.processed_documents:
         return
     
-    st.subheader("🗂️ Document Management")
+    st.subheader("🗂️ 文档管理")
     
     # Clear all data option
     col1, col2 = st.columns([3, 1])
     
     with col1:
-        st.write("Manage your processed documents and data")
+        st.write("管理您已处理的文档和数据")
     
     with col2:
-        if st.button("🗑️ Clear All Data", type="secondary", use_container_width=True):
+        if st.button("🗑️ 清除所有数据", type="secondary", use_container_width=True):
             clear_all_data_local()
 
 def clear_all_data_local():
@@ -262,12 +262,12 @@ def clear_all_data_local():
     """
     try:
         clear_all_data()
-        st.success("All data cleared successfully!")
+        st.success("所有数据已成功清除！")
         st.rerun()
         
     except Exception as e:
         logger.error(f"Error clearing data: {str(e)}")
-        st.error(f"Error clearing data: {str(e)}")
+        st.error(f"清除数据错误：{str(e)}")
 
 # Additional helper functions
 def show_validation_summary(validation_results):
@@ -277,7 +277,7 @@ def show_validation_summary(validation_results):
     if not validation_results:
         return
     
-    st.subheader("🔍 File Validation Results")
+    st.subheader("🔍 文件验证结果")
     
     valid_files = [r for r in validation_results if r['is_valid']]
     invalid_files = [r for r in validation_results if not r['is_valid']]
@@ -285,11 +285,11 @@ def show_validation_summary(validation_results):
     # Summary metrics
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Total Files", len(validation_results))
+        st.metric("总文件数", len(validation_results))
     with col2:
-        st.metric("✅ Valid Files", len(valid_files), delta=None, delta_color="normal")
+        st.metric("✅ 有效文件", len(valid_files), delta=None, delta_color="normal")
     with col3:
-        st.metric("❌ Invalid Files", len(invalid_files), delta=None, delta_color="inverse")
+        st.metric("❌ 无效文件", len(invalid_files), delta=None, delta_color="inverse")
     
     # Show valid files
     if valid_files:

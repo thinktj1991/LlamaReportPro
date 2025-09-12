@@ -5,110 +5,119 @@ from utils.state import init_state, get_processing_stats
 
 # Set page configuration
 st.set_page_config(
-    page_title="Annual Report Analysis System",
+    page_title="年报分析系统",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
+# Hide the default Streamlit pages navigation
+st.markdown("""
+<style>
+    [data-testid="stSidebarNav"] {
+        display: none;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # Initialize session state
 init_state()
 
 def main():
-    st.title("📊 Annual Report Analysis System")
-    st.markdown("Comprehensive analysis of annual reports using LlamaIndex and AI")
+    st.title("📊 年报分析系统")
+    st.markdown("使用LlamaIndex和AI技术进行年报综合分析")
     
     # Sidebar navigation
-    st.sidebar.title("Navigation")
+    st.sidebar.title("导航菜单")
     page = st.sidebar.selectbox(
-        "Select a page:",
-        ["Home", "Upload & Process", "Data Analysis", "Q&A System", "Company Comparison", "Ratio Analysis", "AI Insights", "Data Export"]
+        "选择页面：",
+        ["首页", "上传与处理", "数据分析", "问答系统", "公司对比", "比率分析", "AI洞察", "数据导出"]
     )
     
     # Display selected page
-    if page == "Home":
+    if page == "首页":
         show_home_page()
-    elif page == "Upload & Process":
+    elif page == "上传与处理":
         from pages.upload import show_upload_page
         show_upload_page()
-    elif page == "Data Analysis":
+    elif page == "数据分析":
         from pages.analysis import show_analysis_page
         show_analysis_page()
-    elif page == "Q&A System":
+    elif page == "问答系统":
         from pages.qa_system import show_qa_page
         show_qa_page()
-    elif page == "Company Comparison":
+    elif page == "公司对比":
         from pages.comparison import show_comparison_page
         show_comparison_page()
-    elif page == "Ratio Analysis":
+    elif page == "比率分析":
         # Note: This routing is handled by Streamlit's multipage system
         # The pages/ratio_analysis.py file is executed directly
-        st.info("Navigating to Ratio Analysis... (handled by Streamlit multipage system)")
-    elif page == "AI Insights":
+        st.info("正在导航到比率分析页面... (由Streamlit多页面系统处理)")
+    elif page == "AI洞察":
         from pages.insights import show_insights_page
         show_insights_page()
-    elif page == "Data Export":
+    elif page == "数据导出":
         from pages.export import show_export_page
         show_export_page()
 
 def show_home_page():
-    st.header("Welcome to the Annual Report Analysis System")
+    st.header("欢迎使用年报分析系统")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("🔍 Key Features")
+        st.subheader("🔍 核心功能")
         st.markdown("""
-        - **PDF Processing**: Upload and process multiple annual reports
-        - **Table Extraction**: Advanced extraction of financial tables
-        - **Text Analysis**: Comprehensive content analysis
-        - **Q&A System**: RAG-based question answering
-        - **Ratio Analysis**: Advanced financial ratio calculations
-        - **AI Insights**: Pattern recognition and anomaly detection
-        - **Company Comparison**: Side-by-side analysis with benchmarking
-        - **Data Export**: Professional reports in CSV, Excel, and PDF formats
-        - **Visualization**: Interactive charts and graphs
+        - **PDF处理**: 上传和处理多个年度报告
+        - **表格提取**: 高级财务表格提取技术
+        - **文本分析**: 全面的内容分析
+        - **问答系统**: 基于RAG技术的问答系统
+        - **比率分析**: 高级财务比率计算
+        - **AI洞察**: 模式识别和异常检测
+        - **公司对比**: 多公司并排分析和基准测试
+        - **数据导出**: 生成CSV、Excel和PDF格式的专业报告
+        - **数据可视化**: 交互式图表和图形
         """)
     
     with col2:
-        st.subheader("🚀 Getting Started")
+        st.subheader("🚀 快速入门")
         st.markdown("""
-        1. Navigate to **Upload & Process** to upload PDF files
-        2. Use **Data Analysis** to explore extracted content
-        3. Try the **Q&A System** for intelligent queries
-        4. Analyze ratios in **Ratio Analysis** for detailed financial insights
-        5. Compare companies in **Company Comparison** with industry benchmarks
-        6. Explore **AI Insights** for automated pattern recognition and risk analysis
-        7. Export your analysis in **Data Export** as professional reports
+        1. 访问 **上传与处理** 页面上传PDF文件
+        2. 使用 **数据分析** 探索提取的内容
+        3. 尝试 **问答系统** 进行智能查询
+        4. 在 **比率分析** 中获取详细的财务洞察
+        5. 在 **公司对比** 中进行多公司对比和行业基准分析
+        6. 探索 **AI洞察** 获取自动化模式识别和风险分析
+        7. 在 **数据导出** 中将您的分析结果导出为专业报告
         """)
     
     # System status
-    st.subheader("📋 System Status")
+    st.subheader("📋 系统状态")
     col1, col2, col3, col4 = st.columns(4)
     
     # Get processing stats safely
     stats = get_processing_stats()
     
     with col1:
-        st.metric("Processed Documents", stats['documents_count'])
+        st.metric("已处理文档", stats['documents_count'])
     
     with col2:
-        st.metric("Extracted Tables", stats['tables_count'])
+        st.metric("已提取表格", stats['tables_count'])
     
     with col3:
-        rag_status = "Active" if stats['rag_ready'] else "Inactive"
-        st.metric("RAG System", rag_status)
+        rag_status = "活跃" if stats['rag_ready'] else "非活跃"
+        st.metric("RAG系统", rag_status)
     
     with col4:
-        st.metric("Companies", stats['companies_count'])
+        st.metric("公司数量", stats['companies_count'])
     
     # API Key status
-    st.subheader("🔑 Configuration Status")
+    st.subheader("🔑 配置状态")
     openai_key = os.getenv("OPENAI_API_KEY")
     if openai_key:
-        st.success("✅ OpenAI API Key configured")
+        st.success("✅ OpenAI API密钥已配置")
     else:
-        st.warning("⚠️ OpenAI API Key not found. Please set OPENAI_API_KEY environment variable.")
+        st.warning("⚠️ 未找到OpenAI API密钥。请设置OPENAI_API_KEY环境变量。")
 
 if __name__ == "__main__":
     main()

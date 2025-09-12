@@ -10,43 +10,43 @@ import logging
 logger = logging.getLogger(__name__)
 
 def show_analysis_page():
-    st.header("📊 Data Analysis")
-    st.markdown("Explore and analyze extracted content from your documents")
+    st.header("📊 数据分析")
+    st.markdown("探索和分析从您的文档中提取的内容")
     
     # Initialize session state safely
     init_state()
     
     if not st.session_state.processed_documents:
-        st.warning("No documents processed yet. Please go to 'Upload & Process' to upload documents first.")
+        st.warning("尚未处理任何文档。请先在“上传与处理”页面上传文档。")
         return
     
     # Initialize processors including visualizer
     if not init_processors():
-        st.error("Failed to initialize analysis components")
+        st.error("初始化分析组件失败")
         return
     
     # Sidebar for analysis options
-    st.sidebar.subheader("Analysis Options")
+    st.sidebar.subheader("分析选项")
     analysis_type = st.sidebar.selectbox(
-        "Select Analysis Type:",
-        ["Document Overview", "Table Analysis", "Financial Metrics", "Content Explorer"]
+        "选择分析类型：",
+        ["文档概览", "表格分析", "财务指标", "内容浏览器"]
     )
     
     # Main analysis content
-    if analysis_type == "Document Overview":
+    if analysis_type == "文档概览":
         show_document_overview()
-    elif analysis_type == "Table Analysis":
+    elif analysis_type == "表格分析":
         show_table_analysis()
-    elif analysis_type == "Financial Metrics":
+    elif analysis_type == "财务指标":
         show_financial_metrics()
-    elif analysis_type == "Content Explorer":
+    elif analysis_type == "内容浏览器":
         show_content_explorer()
 
 def show_document_overview():
     """
     Show overview of processed documents
     """
-    st.subheader("📈 Document Processing Overview")
+    st.subheader("📈 文档处理概览")
     
     # Create overview chart
     try:
@@ -55,22 +55,22 @@ def show_document_overview():
         )
         st.plotly_chart(overview_fig, use_container_width=True)
     except Exception as e:
-        st.error(f"Error creating overview chart: {str(e)}")
+        st.error(f"创建概览图表错误：{str(e)}")
     
     # Document details table
-    st.subheader("📋 Document Details")
+    st.subheader("📋 文档详情")
     
     doc_data = []
     for doc_name, doc_info in st.session_state.processed_documents.items():
         company_info = doc_info.get('company_info', {})
         
         doc_data.append({
-            'Document': doc_name,
-            'Company': company_info.get('company_name', 'Unknown'),
-            'Year': company_info.get('year', 'Unknown'),
-            'Pages': doc_info.get('page_count', 0),
-            'Text Length': f"{doc_info.get('total_text_length', 0):,} chars",
-            'Tables': len(st.session_state.extracted_tables.get(doc_name, []))
+            '文档': doc_name,
+            '公司': company_info.get('company_name', '未知'),
+            '年份': company_info.get('year', '未知'),
+            '页数': doc_info.get('page_count', 0),
+            '文本长度': f"{doc_info.get('total_text_length', 0):,} 字符",
+            '表格数': len(st.session_state.extracted_tables.get(doc_name, []))
         })
     
     df = pd.DataFrame(doc_data)
