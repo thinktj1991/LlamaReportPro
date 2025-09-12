@@ -175,12 +175,22 @@ def main():
         {"name": "数据导出", "icon": "📤", "desc": "导出分析结果"}
     ]
     
-    # Enhanced navigation
+    # Initialize navigation state
+    if 'nav_page' not in st.session_state:
+        st.session_state.nav_page = "首页"
+    
+    # Enhanced navigation with state management
+    current_index = next((i for i, opt in enumerate(navigation_options) if opt["name"] == st.session_state.nav_page), 0)
+    
     selected_page = st.sidebar.radio(
         "选择页面",
         [opt["name"] for opt in navigation_options],
+        index=current_index,
         format_func=lambda x: next(opt["icon"] + " " + opt["name"] for opt in navigation_options if opt["name"] == x)
     )
+    
+    # Update session state
+    st.session_state.nav_page = selected_page
     
     # Show navigation status
     for opt in navigation_options:
@@ -404,25 +414,25 @@ def show_home_page():
     
     with col1:
         if st.button("📁 上传文档", use_container_width=True):
-            st.session_state.page = "上传与处理"
+            st.session_state.nav_page = "上传与处理"
             st.rerun()
     
     with col2:
         disabled = stats['documents_count'] == 0
         if st.button("📊 查看分析", use_container_width=True, disabled=disabled):
-            st.session_state.page = "数据分析"
+            st.session_state.nav_page = "数据分析"
             st.rerun()
     
     with col3:
         disabled = not stats['rag_ready']
         if st.button("🤖 智能问答", use_container_width=True, disabled=disabled):
-            st.session_state.page = "问答系统"
+            st.session_state.nav_page = "问答系统"
             st.rerun()
     
     with col4:
         disabled = stats['companies_count'] < 2
         if st.button("🏢 公司对比", use_container_width=True, disabled=disabled):
-            st.session_state.page = "公司对比"
+            st.session_state.nav_page = "公司对比"
             st.rerun()
 
 if __name__ == "__main__":
