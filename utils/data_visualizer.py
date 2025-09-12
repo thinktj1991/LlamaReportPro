@@ -291,11 +291,32 @@ class DataVisualizer:
                     for col in df.columns:
                         if metric_lower in col.lower():
                             # Try to find a numeric value
-                            series = pd.to_numeric(df[col], errors='coerce')
-                            if hasattr(series, 'dropna'):
-                                numeric_values = series.dropna()
-                                if len(numeric_values) > 0 and hasattr(numeric_values, 'iloc'):
-                                    return float(numeric_values.iloc[0])
+                            try:
+                                # Convert column to pandas Series if needed
+                                col_data = df[col] if isinstance(df[col], pd.Series) else pd.Series(df[col])
+                                
+                                # Convert to numeric, handling errors gracefully
+                                numeric_series = pd.to_numeric(col_data, errors='coerce')
+                                
+                                # Ensure we have a Series after numeric conversion
+                                if not isinstance(numeric_series, pd.Series):
+                                    numeric_series = pd.Series(numeric_series)
+                                
+                                # Remove NaN values and check if we have any numeric data
+                                clean_values = numeric_series.dropna()
+                                
+                                # Check if we have valid numeric data using len() to avoid boolean evaluation issues
+                                if isinstance(clean_values, pd.Series) and len(clean_values.index) > 0:
+                                    # Get the first non-null value safely
+                                    try:
+                                        first_val = clean_values.iat[0]  # Use .iat for scalar access
+                                        if pd.notna(first_val):
+                                            return float(first_val)
+                                    except (IndexError, ValueError):
+                                        continue
+                                        
+                            except (ValueError, TypeError, IndexError, AttributeError):
+                                continue
             
             return 0.0
             
