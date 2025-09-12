@@ -12,8 +12,16 @@ logger = logging.getLogger(__name__)
 
 def show_ratio_analysis_page():
     try:
-        st.header("📊 财务比率分析")
-        st.markdown("高级财务比率计算和趋势分析")
+        # Enhanced header with financial analysis capabilities showcase
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #6c5ce7 0%, #a29bfe 100%); padding: 2rem; border-radius: 12px; color: white; margin-bottom: 2rem;">
+            <h2>📊 智能财务比率分析</h2>
+            <p>全面计算和分析公司的关键财务比率，提供专业的投资和分析洞察</p>
+            <div style="background: rgba(255,255,255,0.2); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+                <strong>🎆 分析能力:</strong> 多维度比率 • 趋势分析 • 行业对比 • 健康评分 • 专业指导
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         
         # Initialize session state safely with error handling
         state_initialized = init_state()
@@ -39,8 +47,20 @@ def show_ratio_analysis_page():
             st.error(f"初始化财务计算器错误：{str(e)}")
             st.session_state.financial_calculator = None
         
-        # Main content tabs - always show them
-        tab1, tab2, tab3, tab4 = st.tabs(["🧮 比率计算器", "📈 趋势分析", "🏢 公司对比", "📋 比率库"])
+        # Enhanced tabs layout with modern styling
+        st.markdown("""
+        <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin: 2rem 0;">
+            <h4 style="margin: 0 0 1rem 0; color: #495057;">📊 综合比率分析工具</h4>
+            <p style="margin: 0; color: #6c757d; font-size: 0.9rem;">选择下方标签页使用不同的分析功能</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "🧮 比率计算器", 
+            "📈 趋势分析", 
+            "🏢 公司对比", 
+            "📋 比率库"
+        ])
         
         with tab1:
             try:
@@ -82,17 +102,38 @@ def show_ratio_analysis_page():
 
 def show_ratio_calculator():
     """
-    Show financial ratio calculator for individual companies
+    Show enhanced financial ratio calculator for individual companies
     """
-    st.subheader("🧮 财务比率计算器")
+    st.markdown("""
+    <div style="background: #f8f9fa; padding: 2rem; border-radius: 12px; margin: 2rem 0;">
+        <h3 style="margin: 0 0 1rem 0; color: #495057;">🧮 智能财务比率计算器</h3>
+        <p style="margin: 0; color: #6c757d;">选择公司并自动计算关键财务比率，获得专业的健康评分和改善建议</p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Company selection
-    available_companies = list(st.session_state.company_data.keys())
+    # Enhanced company selection with empty state protection
+    available_companies = list(st.session_state.company_data.keys()) if st.session_state.company_data else []
+    
+    if not available_companies:
+        st.markdown("""
+        <div style="text-align: center; padding: 2rem; background: #e9ecef; border-radius: 8px; border: 2px dashed #ced4da;">
+            <h4 style="color: #6c757d;">📄 暂无公司数据</h4>
+            <p style="color: #6c757d;">请先上传并处理公司文档</p>
+        </div>
+        """, unsafe_allow_html=True)
+        return
+    
+    st.markdown("""
+    <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin: 1rem 0;">
+        <h4 style="margin: 0 0 1rem 0; color: #495057;">🏢 选择分析公司</h4>
+        <p style="margin: 0 0 1rem 0; color: #6c757d; font-size: 0.9rem;">可用公司: {} 家</p>
+    </div>
+    """.format(len(available_companies)), unsafe_allow_html=True)
     
     selected_company = st.selectbox(
-        "选择进行比率分析的公司：",
+        "选择要分析的公司：",
         options=available_companies,
-        help="选择一家公司来分析财务比率"
+        help="选择一家公司进行全面的财务比率分析和健康评估"
     )
     
     if selected_company:
