@@ -1,10 +1,10 @@
-modules = ["python-3.11"]
+modules = ["python-3.11", "python3"]
 [agent]
 integrations = ["python_openai:1.0.0"]
 
 [nix]
 channel = "stable-25_05"
-packages = ["glibcLocales"]
+packages = ["glibcLocales", "libxcrypt", "pkg-config", "xsimd"]
 
 [deployment]
 deploymentTarget = "autoscale"

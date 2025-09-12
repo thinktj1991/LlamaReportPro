@@ -6,6 +6,7 @@ from plotly.subplots import make_subplots
 from utils.company_comparator import CompanyComparator
 from utils.data_visualizer import DataVisualizer
 from utils.state import init_state, init_processors
+from utils.industry_analytics import IndustryAnalytics
 import logging
 
 # Configure logging
@@ -34,8 +35,15 @@ def show_comparison_page():
     # Company selection and comparison setup
     show_comparison_setup()
     
-    # Main comparison content
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📈 Metrics", "📋 Data Table", "🔍 Insights"])
+    # Initialize industry analytics
+    if not hasattr(st.session_state, 'industry_analytics') or st.session_state.industry_analytics is None:
+        st.session_state.industry_analytics = IndustryAnalytics()
+
+    # Main comparison content - Enhanced with industry analytics
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊 Overview", "📈 Metrics", "📋 Data Table", 
+        "🔍 Insights", "🏆 Rankings", "🏭 Industry Benchmarks"
+    ])
     
     with tab1:
         show_comparison_overview()
@@ -48,6 +56,12 @@ def show_comparison_page():
     
     with tab4:
         show_comparison_insights()
+    
+    with tab5:
+        show_percentile_rankings()
+    
+    with tab6:
+        show_industry_benchmarks()
 
 def show_comparison_setup():
     """
@@ -428,9 +442,222 @@ def show_comparison_insights():
             st.write(f"{i}. {insight}")
     else:
         st.info("No insights available for the selected comparison.")
+
+
+def show_percentile_rankings():
+    """
+    Show percentile rankings and competitive positioning
+    """
+    if (not hasattr(st.session_state, 'selected_companies') or 
+        len(st.session_state.selected_companies) < 2):
+        st.warning("Please select at least 2 companies in the setup section for rankings analysis.")
+        return
     
-    # Additional analysis options
-    show_additional_analysis(selected_data)
+    st.subheader("🏆 Percentile Rankings & Competitive Positioning")
+    st.markdown("Advanced statistical analysis of company performance relative to peers")
+    
+    # Get selected company data
+    selected_data = {k: v for k, v in st.session_state.company_data.items() 
+                    if k in st.session_state.selected_companies}
+    
+    # Calculate percentile rankings
+    with st.spinner("Calculating percentile rankings..."):
+        percentile_data = st.session_state.industry_analytics.calculate_industry_percentiles(selected_data)
+    
+    if not percentile_data:
+        st.warning("Insufficient data for percentile analysis. Companies need financial metrics for ranking.")
+        return
+    
+    # Display rankings table
+    st.subheader("📊 Percentile Rankings Table")
+    st.markdown("**Legend**: 📈 Higher is Better | 📉 Lower is Better")
+    
+    rankings_data = []
+    for company_name, metrics in percentile_data.items():
+        for metric, data in metrics.items():
+            # Add orientation indicator
+            orientation_symbol = "📈" if data['orientation'] == 'Higher is Better' else "📉"
+            rankings_data.append({
+                'Company': company_name,
+                'Metric': f"{orientation_symbol} {metric.replace('_', ' ').title()}",
+                'Value': f"{data['value']:.3f}" if isinstance(data['value'], float) else str(data['value']),
+                'Percentile': f"{data['percentile']:.1f}%",
+                'Rank': f"{data['rank']}/{data['total_companies']}"
+            })
+    
+    if rankings_data:
+        rankings_df = pd.DataFrame(rankings_data)
+        
+        # Color code by percentile
+        def color_percentile(val):
+            try:
+                percentile = float(val.replace('%', ''))
+                if percentile >= 80:
+                    return 'background-color: #d4edda'  # Green
+                elif percentile >= 60:
+                    return 'background-color: #fff3cd'  # Yellow
+                elif percentile >= 40:
+                    return 'background-color: #f8d7da'  # Light red
+                else:
+                    return 'background-color: #f5c6cb'  # Red
+            except:
+                return ''
+        
+        styled_df = rankings_df.style.applymap(color_percentile, subset=['Percentile'])
+        st.dataframe(styled_df, use_container_width=True)
+        
+        # Competitive positioning chart
+        st.subheader("🎯 Competitive Positioning Radar")
+        positioning_chart = st.session_state.industry_analytics.create_competitive_positioning_chart(percentile_data)
+        if positioning_chart:
+            st.plotly_chart(positioning_chart, use_container_width=True)
+        
+        # Performance summary
+        st.subheader("📈 Performance Summary")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Top performers
+            st.write("**🏆 Top Performers by Metric:**")
+            top_performers = {}
+            for company_name, metrics in percentile_data.items():
+                for metric, data in metrics.items():
+                    if data['percentile'] >= 80:
+                        if metric not in top_performers:
+                            top_performers[metric] = []
+                        top_performers[metric].append(company_name)
+            
+            for metric, companies in top_performers.items():
+                st.write(f"• **{metric.replace('_', ' ').title()}**: {', '.join(companies)}")
+        
+        with col2:
+            # Company strengths
+            st.write("**💪 Company Strengths:**")
+            for company_name, metrics in percentile_data.items():
+                strengths = [metric.replace('_', ' ').title() for metric, data in metrics.items() 
+                           if data['percentile'] >= 70]
+                if strengths:
+                    st.write(f"• **{company_name}**: {', '.join(strengths[:3])}")
+
+
+def show_industry_benchmarks():
+    """
+    Show industry benchmark analysis
+    """
+    if (not hasattr(st.session_state, 'selected_companies') or 
+        len(st.session_state.selected_companies) < 1):
+        st.warning("Please select companies in the setup section for industry benchmarking.")
+        return
+    
+    st.subheader("🏭 Industry Benchmark Analysis")
+    st.markdown("Compare companies against industry-standard performance benchmarks")
+    
+    # Get selected company data
+    selected_data = {k: v for k, v in st.session_state.company_data.items() 
+                    if k in st.session_state.selected_companies}
+    
+    # Calculate industry benchmarks
+    with st.spinner("Analyzing industry benchmarks..."):
+        benchmark_data = st.session_state.industry_analytics.benchmark_against_industry(selected_data)
+    
+    if not benchmark_data:
+        st.warning("Unable to perform industry benchmarking. Companies need financial metrics.")
+        return
+    
+    # Industry overview
+    st.subheader("🏢 Industry Classification")
+    industry_summary = {}
+    for company_name, data in benchmark_data.items():
+        industry = data['industry']
+        if industry not in industry_summary:
+            industry_summary[industry] = []
+        industry_summary[industry].append(company_name)
+    
+    for industry, companies in industry_summary.items():
+        st.write(f"**{industry}**: {', '.join(companies)}")
+    
+    # Overall benchmark performance chart
+    st.subheader("📊 Overall Benchmark Performance")
+    benchmark_chart = st.session_state.industry_analytics.create_industry_benchmark_chart(benchmark_data)
+    if benchmark_chart:
+        st.plotly_chart(benchmark_chart, use_container_width=True)
+    
+    # Detailed benchmark results
+    st.subheader("📋 Detailed Benchmark Results")
+    
+    for company_name, data in benchmark_data.items():
+        with st.expander(f"📈 {company_name} - {data['industry']} (Score: {data['overall_score']:.2f}/4.0)"):
+            
+            # Performance overview
+            col1, col2 = st.columns([1, 2])
+            
+            with col1:
+                # Score display
+                score = data['overall_score']
+                if score >= 3.5:
+                    st.success(f"Overall Score: {score:.2f}/4.0 🌟")
+                elif score >= 2.5:
+                    st.info(f"Overall Score: {score:.2f}/4.0 ✅")
+                elif score >= 1.5:
+                    st.warning(f"Overall Score: {score:.2f}/4.0 ⚠️")
+                else:
+                    st.error(f"Overall Score: {score:.2f}/4.0 ❌")
+            
+            with col2:
+                # Quick summary
+                excellent_count = sum(1 for m in data['metrics'].values() if m['performance'] == 'Excellent')
+                good_count = sum(1 for m in data['metrics'].values() if m['performance'] == 'Good')
+                total_metrics = len(data['metrics'])
+                
+                st.write(f"**Performance Breakdown:**")
+                st.write(f"• Excellent: {excellent_count}/{total_metrics}")
+                st.write(f"• Good: {good_count}/{total_metrics}")
+                st.write(f"• Total Metrics Analyzed: {total_metrics}")
+            
+            # Detailed metrics
+            if data['metrics']:
+                metrics_data = []
+                for metric, metric_data in data['metrics'].items():
+                    metrics_data.append({
+                        'Metric': metric.replace('_', ' ').title(),
+                        'Value': f"{metric_data['value']:.3f}" if isinstance(metric_data['value'], float) else str(metric_data['value']),
+                        'Performance': metric_data['performance'],
+                        'Score': f"{metric_data['score']}/4"
+                    })
+                
+                metrics_df = pd.DataFrame(metrics_data)
+                
+                # Color code by performance
+                def color_performance(val):
+                    if val == 'Excellent':
+                        return 'background-color: #d4edda'  # Green
+                    elif val == 'Good':
+                        return 'background-color: #d1ecf1'  # Blue
+                    elif val == 'Average':
+                        return 'background-color: #fff3cd'  # Yellow
+                    elif val == 'Below Average':
+                        return 'background-color: #f8d7da'  # Light red
+                    else:
+                        return 'background-color: #f5c6cb'  # Red
+                
+                styled_metrics = metrics_df.style.applymap(color_performance, subset=['Performance'])
+                st.dataframe(styled_metrics, use_container_width=True)
+    
+    # Generate competitive insights
+    st.subheader("🔍 Competitive Intelligence")
+    
+    # Also get percentile data for comprehensive insights
+    percentile_data = st.session_state.industry_analytics.calculate_industry_percentiles(selected_data)
+    
+    competitive_insights = st.session_state.industry_analytics.generate_competitive_insights(
+        percentile_data, benchmark_data
+    )
+    
+    if competitive_insights:
+        for insight in competitive_insights:
+            st.write(f"• {insight}")
+    else:
+        st.info("No competitive insights available.")
 
 def show_additional_analysis(selected_data):
     """
