@@ -4,6 +4,7 @@ from utils.pdf_processor import PDFProcessor
 from utils.table_extractor import TableExtractor
 from utils.rag_system import RAGSystem
 from utils.company_comparator import CompanyComparator
+from utils.enhanced_integration import get_system_integrator
 from utils.state import init_state, init_processors, get_processing_stats, clear_all_data
 import logging
 
@@ -29,6 +30,9 @@ def show_upload_page():
     if not init_processors():
         st.error("初始化处理组件失败")
         return
+    
+    # System status and enhancement toggle
+    show_system_status()
     
     # Enhanced file upload section
     st.subheader("📤 选择您的文档")
@@ -196,8 +200,9 @@ def process_uploaded_files(uploaded_files):
                 status_text.info(f"📄 正在处理: {uploaded_file.name}")
                 
                 with st.spinner(f"🚀 正在处理 {uploaded_file.name}..."):
-                    # Process PDF
-                    processed_data = st.session_state.pdf_processor.process_uploaded_file(uploaded_file)
+                    # Process PDF with enhanced or legacy processor
+                    integrator = get_system_integrator()
+                    processed_data = integrator.process_uploaded_file(uploaded_file)
                     
                     # Extract company information
                     company_info = st.session_state.pdf_processor.extract_company_info(processed_data['documents'])
@@ -340,6 +345,67 @@ def show_processing_summary():
                     financial_badge = "💰 财务" if table['is_financial'] else "📋 一般"
                     importance = table['importance_score']
                     st.write(f"• {table['table_id']} - {financial_badge} - 重要性：{importance:.2f}")
+
+def show_system_status():
+    """
+    Display system status and enhancement controls
+    """
+    with st.expander("🚀 系统增强功能状态", expanded=False):
+        integrator = get_system_integrator()
+        system_status = integrator.get_system_status()
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**🔧 当前配置:**")
+            
+            # Enhanced mode status
+            if system_status['enhanced_mode']:
+                st.success("✅ 增强模式：已启用 (LlamaIndex)")
+            else:
+                st.info("ℹ️ 增强模式：使用基础模式")
+            
+            # API keys status
+            if system_status['environment']['llamaparse_key_available']:
+                st.success("🔑 LlamaParse API Key: 可用")
+            else:
+                st.warning("🔑 LlamaParse API Key: 未设置")
+                
+            if system_status['environment']['openai_key_available']:
+                st.success("🔑 OpenAI API Key: 可用")
+            else:
+                st.error("🔑 OpenAI API Key: 缺失")
+        
+        with col2:
+            st.markdown("**🎯 可用功能:**")
+            
+            capabilities = system_status['capabilities']
+            
+            if capabilities['llamaparse_processing']:
+                st.success("📄 LlamaParse高级解析: 可用")
+            else:
+                st.info("📄 PDF解析: 使用基础模式")
+                
+            if capabilities['advanced_querying']:
+                st.success("🧠 智能查询引擎: 可用")
+            else:
+                st.info("🧠 查询系统: 使用基础模式")
+                
+            if capabilities['fallback_available']:
+                st.success("🛡️ 备用系统: 就绪")
+            else:
+                st.warning("🛡️ 备用系统: 不可用")
+        
+        # Enhancement tips
+        if not system_status['enhanced_mode']:
+            st.markdown("""
+            <div style="background: #fff3cd; padding: 1rem; border-radius: 8px; border-left: 4px solid #ffc107; margin-top: 1rem;">
+                <h5 style="margin: 0 0 0.5rem 0; color: #856404;">💡 启用增强功能提示</h5>
+                <p style="margin: 0; color: #856404;">
+                要启用LlamaIndex增强功能，请设置环境变量 <code>USE_ENHANCED_LLAMAINDEX=true</code> 和 <code>LLAMA_CLOUD_API_KEY</code>
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
 
 def show_document_management():
     """
