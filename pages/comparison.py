@@ -14,18 +14,38 @@ import logging
 logger = logging.getLogger(__name__)
 
 def show_comparison_page():
-    st.header("🔄 公司对比")
-    st.markdown("对比不同公司的财务指标和绩效表现")
+    # Enhanced header with comparison capabilities showcase
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%); padding: 2rem; border-radius: 12px; color: white; margin-bottom: 2rem;">
+        <h2>🔄 智能公司对比分析</h2>
+        <p>全面对比多家公司的财务数据、绩效指标和行业地位，发现投资机会</p>
+        <div style="background: rgba(255,255,255,0.2); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+            <strong>🎆 对比能力:</strong> 多维度对比 • 行业基准 • 动态排名 • 智能洞察 • 个性化分析
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Initialize session state safely
     init_state()
     
+    # Enhanced empty state checks
     if not st.session_state.company_data:
-        st.warning("没有可用的公司数据。请先在“上传与处理”页面处理文档。")
+        st.markdown("""
+        <div style="text-align: center; padding: 3rem; background: #f8f9fa; border-radius: 12px; border: 2px dashed #dee2e6;">
+            <h3 style="color: #6c757d;">📁 需要公司数据</h3>
+            <p style="color: #6c757d; font-size: 1.1rem;">请先在上传与处理页面处理至少两家公司的年报文档</p>
+        </div>
+        """, unsafe_allow_html=True)
         return
     
     if len(st.session_state.company_data) < 2:
-        st.warning("需要至少两家公司进行对比。请上传更多年报。")
+        st.markdown("""
+        <div style="text-align: center; padding: 2rem; background: #fff3cd; border-radius: 12px; border-left: 4px solid #ffeaa7;">
+            <h3 style="color: #856404;">🏢 需要更多公司</h3>
+            <p style="color: #856404;">对比分析需要至少两家公司的数据。当前只有 <strong>{}</strong> 家公司</p>
+            <p style="color: #856404;">请上传更多年报文档后再进行对比分析</p>
+        </div>
+        """.format(len(st.session_state.company_data)), unsafe_allow_html=True)
         return
     
     # Initialize processors including comparator and visualizer
@@ -40,10 +60,17 @@ def show_comparison_page():
     if not hasattr(st.session_state, 'industry_analytics') or st.session_state.industry_analytics is None:
         st.session_state.industry_analytics = IndustryAnalytics()
 
-    # Main comparison content - Enhanced with industry analytics
+    # Enhanced comparison tabs with modern styling
+    st.markdown("""
+    <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin: 2rem 0;">
+        <h4 style="margin: 0 0 1rem 0; color: #495057;">📈 全面对比分析</h4>
+        <p style="margin: 0; color: #6c757d; font-size: 0.9rem;">选择下方标签页查看不同维度的对比分析结果</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📊 概览", "📈 指标", "📋 数据表", 
-        "🔍 洞察", "🏆 排名", "🏭 行业基准"
+        "📊 公司概览", "📈 指标对比", "📋 详细数据", 
+        "🔍 AI洞察", "🏆 竞争排名", "🏭 行业基准"
     ])
     
     with tab1:
@@ -71,35 +98,64 @@ def show_comparison_page():
 
 def show_comparison_setup():
     """
-    Setup comparison parameters
+    Enhanced comparison setup with modern UI
     """
-    st.subheader("⚙️ 对比设置")
+    st.markdown("""
+    <div style="background: #f8f9fa; padding: 2rem; border-radius: 12px; margin: 2rem 0;">
+        <h3 style="margin: 0 0 1rem 0; color: #495057;">⚙️ 对比参数设置</h3>
+        <p style="margin: 0; color: #6c757d;">选择您想要对比的公司和关键指标，系统将生成全面的对比分析报告</p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Company selection
+    # Company selection with enhanced info
     available_companies = list(st.session_state.company_data.keys())
     
-    col1, col2 = st.columns(2)
+    st.markdown("""
+    <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin: 1rem 0;">
+        <h4 style="margin: 0 0 1rem 0; color: #495057;">🏢 公司选择</h4>
+        <p style="margin: 0 0 1rem 0; color: #6c757d; font-size: 0.9rem;">可用公司: {}</p>
+    </div>
+    """.format(len(available_companies)), unsafe_allow_html=True)
     
-    with col1:
+    # Enhanced layout with better organization
+    setup_col1, setup_col2 = st.columns(2)
+    
+    with setup_col1:
+        st.markdown("**🏢 选择对比公司**")
         selected_companies = st.multiselect(
             "选择要对比的公司：",
             options=available_companies,
             default=available_companies[:min(3, len(available_companies))],
-            help="选择两家或更多公司进行对比"
+            help="选择两家或更多公司进行对比分析"
         )
+        
+        # Show selected company info
+        if selected_companies:
+            st.markdown(f"**✅ 已选择:** {len(selected_companies)} 家公司")
+            for company in selected_companies:
+                company_info = st.session_state.company_data[company]
+                year = company_info.get('year', '未知')
+                st.caption(f"• {company} ({year})") 
     
-    with col2:
+    with setup_col2:
+        st.markdown("**📈 选择对比指标**")
         # Metric selection
         available_metrics = st.session_state.company_comparator.identify_available_metrics(
             st.session_state.company_data
         )
         
         selected_metrics = st.multiselect(
-            "选择要对比的指标：",
+            "选择财务指标：",
             options=available_metrics,
             default=available_metrics[:min(5, len(available_metrics))],
-            help="选择财务指标进行对比"
+            help="选择关键财务指标进行深度对比"
         )
+        
+        # Show metric info
+        if selected_metrics:
+            st.markdown(f"**✅ 已选择:** {len(selected_metrics)} 个指标")
+            if len(selected_metrics) > 8:
+                st.warning("ℹ️ 指标较多，可能影响显示效果")
     
     # Store selections in session state
     st.session_state.selected_companies = selected_companies
@@ -111,51 +167,115 @@ def show_comparison_setup():
 
 def show_metric_coverage(available_metrics):
     """
-    Show metric coverage across companies
+    Show enhanced metric coverage visualization
     """
-    with st.expander("📊 指标覆盖范围", expanded=False):
+    with st.expander("📊 数据质量与指标覆盖情况", expanded=False):
+        st.markdown("""
+        <div style="background: #e3f2fd; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+            <strong>📈 数据质量分析:</strong> 了解各指标在不同公司中的可用性，选择覆盖率高的指标可获得更准确的对比结果
+        </div>
+        """, unsafe_allow_html=True)
         coverage = st.session_state.company_comparator.calculate_metric_coverage(
             st.session_state.company_data
         )
         
         if coverage:
-            # Create coverage chart
+            # Enhanced coverage visualization
             metrics = list(coverage.keys())
             coverage_pcts = list(coverage.values())
+            
+            # Create color-coded coverage chart
+            colors = ['#e74c3c' if pct < 30 else '#f39c12' if pct < 70 else '#27ae60' for pct in coverage_pcts]
             
             fig = go.Figure(data=go.Bar(
                 x=metrics,
                 y=coverage_pcts,
                 text=[f"{pct:.0f}%" for pct in coverage_pcts],
                 textposition='auto',
+                marker=dict(
+                    color=colors,
+                    line=dict(color='rgba(0,0,0,0.2)', width=1)
+                ),
+                hovertemplate='<b>%{x}</b><br>Coverage: %{y:.1f}%<extra></extra>'
             ))
             
             fig.update_layout(
-                title="Metric Availability Across Companies",
-                xaxis_title="Metrics",
-                yaxis_title="Coverage (%)",
+                title={
+                    'text': "📈 指标在各公司中的覆盖情况",
+                    'x': 0.5,
+                    'xanchor': 'center'
+                },
+                xaxis_title="财务指标",
+                yaxis_title="覆盖率 (%)",
                 yaxis=dict(range=[0, 100]),
-                height=400
+                height=450,
+                showlegend=False,
+                plot_bgcolor='white',
+                paper_bgcolor='white'
             )
             
             st.plotly_chart(fig, use_container_width=True)
             
-            # Show metrics with best coverage
+            # Coverage statistics
+            coverage_stats_col1, coverage_stats_col2, coverage_stats_col3 = st.columns(3)
+            
+            with coverage_stats_col1:
+                high_coverage = sum(1 for pct in coverage_pcts if pct >= 70)
+                st.metric("🟢 高覆盖指标", f"{high_coverage} 个", help="覆盖率 ≥ 70%")
+            
+            with coverage_stats_col2:
+                medium_coverage = sum(1 for pct in coverage_pcts if 30 <= pct < 70)
+                st.metric("🟡 中等覆盖指标", f"{medium_coverage} 个", help="30% ≤ 覆盖率 < 70%")
+            
+            with coverage_stats_col3:
+                low_coverage = sum(1 for pct in coverage_pcts if pct < 30)
+                st.metric("🔴 低覆盖指标", f"{low_coverage} 个", help="覆盖率 < 30%")
+            
+            # Enhanced metrics recommendations
             high_coverage_metrics = {k: v for k, v in coverage.items() if v >= 50}
             if high_coverage_metrics:
-                st.write("**Metrics with 50%+ coverage:**")
-                for metric, pct in sorted(high_coverage_metrics.items(), key=lambda x: x[1], reverse=True):
-                    st.write(f"• {metric}: {pct:.0f}%")
+                st.markdown("**👍 推荐对比指标（覆盖率 ≥ 50%）:**")
+                
+                # Group metrics by coverage level
+                excellent_metrics = [(k, v) for k, v in high_coverage_metrics.items() if v >= 80]
+                good_metrics = [(k, v) for k, v in high_coverage_metrics.items() if 50 <= v < 80]
+                
+                if excellent_metrics:
+                    st.markdown("**✅ 优秀覆盖（≥ 80%）:**")
+                    for metric, pct in sorted(excellent_metrics, key=lambda x: x[1], reverse=True):
+                        st.markdown(f"• **{metric}**: {pct:.0f}%")
+                
+                if good_metrics:
+                    st.markdown("**👌 良好覆盖（50-80%）:**")
+                    for metric, pct in sorted(good_metrics, key=lambda x: x[1], reverse=True):
+                        st.markdown(f"• {metric}: {pct:.0f}%")
+            else:
+                st.markdown("""
+                <div style="background: #fff3cd; color: #856404; padding: 1rem; border-radius: 8px;">
+                    <strong>⚠️ 数据覆盖不足</strong><br>
+                    建议上传更多公司数据或检查数据质量以获得更好的对比效果
+                </div>
+                """, unsafe_allow_html=True)
 
 def show_comparison_overview():
     """
-    Show overview comparison of companies
+    Show enhanced company overview comparison
     """
     if not hasattr(st.session_state, 'selected_companies') or len(st.session_state.selected_companies) < 2:
-        st.warning("Please select at least 2 companies in the setup section.")
+        st.markdown("""
+        <div style="text-align: center; padding: 2rem; background: #f8d7da; border-radius: 8px; border-left: 4px solid #f5c6cb;">
+            <h4 style="color: #721c24;">⚠️ 需要选择公司</h4>
+            <p style="color: #721c24;">请在上方的设置区域选择至少 2 家公司进行对比</p>
+        </div>
+        """, unsafe_allow_html=True)
         return
     
-    st.subheader("🏢 Company Overview")
+    st.markdown("""
+    <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
+        <h4 style="margin: 0 0 1rem 0; color: #495057;">🏢 公司基本情况对比</h4>
+        <p style="margin: 0; color: #6c757d;">对比选中公司的基本信息和数据质量</p>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Create overview comparison
     selected_data = {k: v for k, v in st.session_state.company_data.items() 
