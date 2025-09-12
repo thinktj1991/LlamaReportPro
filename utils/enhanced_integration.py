@@ -61,7 +61,7 @@ class EnhancedSystemIntegrator:
         Process uploaded file with enhanced or legacy processor
         """
         try:
-            if self.use_enhanced and self.enhanced_pdf_processor:
+            if self.use_enhanced and self.enhanced_pdf_processor is not None:
                 logger.info(f"Processing {uploaded_file.name} with enhanced processor")
                 result = self.enhanced_pdf_processor.process_uploaded_file(uploaded_file)
                 
@@ -77,6 +77,12 @@ class EnhancedSystemIntegrator:
                 
             else:
                 logger.info(f"Processing {uploaded_file.name} with legacy processor")
+                if self.legacy_pdf_processor is None:
+                    return {
+                        'error': True,
+                        'error_message': 'No processor available',
+                        'processing_method': 'error'
+                    }
                 result = self.legacy_pdf_processor.process_uploaded_file(uploaded_file)
                 result['processing_method'] = 'legacy_basic'
                 return result
@@ -84,7 +90,7 @@ class EnhancedSystemIntegrator:
         except Exception as e:
             logger.error(f"Error in file processing: {str(e)}")
             # Always fall back to legacy processor
-            if self.legacy_pdf_processor:
+            if self.legacy_pdf_processor is not None:
                 logger.info("Falling back to legacy processor")
                 result = self.legacy_pdf_processor.process_uploaded_file(uploaded_file)
                 result['processing_method'] = 'legacy_fallback'
@@ -160,14 +166,18 @@ class EnhancedSystemIntegrator:
         """
         try:
             # Build standard RAG index first
+            if self.rag_system is None:
+                return False
             success = self.rag_system.build_index(processed_documents, extracted_tables)
             
             if success and self.use_enhanced:
                 # Try to build enhanced query manager
                 try:
-                    index = self.rag_system.index
+                    if self.rag_system is None:
+                        return success
+                    index = getattr(self.rag_system, 'index', None)
                     if index:
-                        llm = self.rag_system.llm if hasattr(self.rag_system, 'llm') else None
+                        llm = getattr(self.rag_system, 'llm', None)
                         self.enhanced_query_manager = EnhancedQueryEngineManager(index, llm)
                         router_engine = self.enhanced_query_manager.build_router_query_engine()
                         if router_engine:
@@ -199,6 +209,12 @@ class EnhancedSystemIntegrator:
             
             else:
                 logger.info("Using legacy query system")
+                if self.rag_system is None:
+                    return {
+                        'answer': "RAG system not available",
+                        'error': True,
+                        'query_method': 'error'
+                    }
                 result = self.rag_system.query(question, context_filter)
                 result['query_method'] = 'legacy_basic'
                 return result
@@ -206,7 +222,7 @@ class EnhancedSystemIntegrator:
         except Exception as e:
             logger.error(f"Error in query processing: {str(e)}")
             # Fall back to legacy system
-            if self.rag_system:
+            if self.rag_system is not None:
                 result = self.rag_system.query(question, context_filter)
                 result['query_method'] = 'legacy_fallback'
                 result['query_error'] = str(e)
@@ -224,10 +240,13 @@ class EnhancedSystemIntegrator:
         """
         try:
             # Get basic stats
-            if self.enhanced_pdf_processor and processed_data.get('processing_method', '').startswith('enhanced'):
+            if (self.enhanced_pdf_processor is not None and 
+                processed_data.get('processing_method', '').startswith('enhanced')):
                 stats = self.enhanced_pdf_processor.get_processing_stats(processed_data)
-            else:
+            elif self.legacy_pdf_processor is not None:
                 stats = self.legacy_pdf_processor.get_processing_stats(processed_data)
+            else:
+                stats = {'error': 'No processor available', 'integration_info': {}}
             
             # Add integration information
             stats['integration_info'] = {
