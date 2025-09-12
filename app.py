@@ -22,7 +22,7 @@ def main():
     st.sidebar.title("Navigation")
     page = st.sidebar.selectbox(
         "Select a page:",
-        ["Home", "Upload & Process", "Data Analysis", "Q&A System", "Company Comparison", "Ratio Analysis"]
+        ["Home", "Upload & Process", "Data Analysis", "Q&A System", "Company Comparison", "Ratio Analysis", "AI Insights"]
     )
     
     # Display selected page
@@ -44,6 +44,9 @@ def main():
         # Note: This routing is handled by Streamlit's multipage system
         # The pages/ratio_analysis.py file is executed directly
         st.info("Navigating to Ratio Analysis... (handled by Streamlit multipage system)")
+    elif page == "AI Insights":
+        from pages.insights import show_insights_page
+        show_insights_page()
 
 def show_home_page():
     st.header("Welcome to the Annual Report Analysis System")
@@ -58,8 +61,9 @@ def show_home_page():
         - **Text Analysis**: Comprehensive content analysis
         - **Q&A System**: RAG-based question answering
         - **Ratio Analysis**: Advanced financial ratio calculations
+        - **AI Insights**: Pattern recognition and anomaly detection
+        - **Company Comparison**: Side-by-side analysis with benchmarking
         - **Visualization**: Interactive charts and graphs
-        - **Company Comparison**: Side-by-side analysis
         """)
     
     with col2:
@@ -69,7 +73,8 @@ def show_home_page():
         2. Use **Data Analysis** to explore extracted content
         3. Try the **Q&A System** for intelligent queries
         4. Analyze ratios in **Ratio Analysis** for detailed financial insights
-        5. Compare companies in **Company Comparison**
+        5. Compare companies in **Company Comparison** with industry benchmarks
+        6. Explore **AI Insights** for automated pattern recognition and risk analysis
         """)
     
     # System status
