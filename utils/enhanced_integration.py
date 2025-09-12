@@ -6,6 +6,10 @@ import os
 import logging
 from typing import Dict, Any, Optional
 import streamlit as st
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 from utils.enhanced_pdf_processor import EnhancedPDFProcessor
 from utils.enhanced_query_engines import EnhancedQueryEngineManager
 from utils.pdf_processor import PDFProcessor  # Fallback
