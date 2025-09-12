@@ -19,11 +19,19 @@ logger = logging.getLogger(__name__)
 
 def show_export_page():
     """
-    Main export page
+    Main export page with enhanced UI/UX
     """
     try:
-        st.header("📁 数据导出中心")
-        st.markdown("所有分析结果和报告的集中导出中心")
+        # Enhanced header with export capabilities showcase
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%); padding: 2rem; border-radius: 12px; color: white; margin-bottom: 2rem;">
+            <h2>📁 智能数据导出中心</h2>
+            <p>专业级数据导出解决方案，支持多格式、批量处理，为您的分析结果提供完整的数据交付服务</p>
+            <div style="background: rgba(255,255,255,0.2); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+                <strong>💾 导出能力:</strong> 多格式支持 • 批量处理 • 自定义配置 • 专业报告 • 数据完整性保证
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         
         # Initialize session state
         init_state()
@@ -42,17 +50,21 @@ def show_export_page():
         )
         
         if not has_any_data:
-            st.warning("⚠️ 没有可用于导出的分析数据")
-            st.info("""
-            **要启用数据导出，请：**
-            
-            1. 📄 **上传与处理** 在上传与处理页面上传文档
-            2. 📊 **生成分析** 使用各种分析模块
-            3. 🔍 **运行对比** 在公司对比页面进行对比
-            4. 📈 **创建AI预测** 在AI洞察页面的预测标签中生成预测
-            
-            一旦您有了分析结果，请返回此处以多种格式导出您的数据。
-            """)
+            st.markdown("""
+            <div style="text-align: center; padding: 3rem; background: #f8f9fa; border-radius: 12px; border: 2px dashed #dee2e6; margin: 2rem 0;">
+                <h3 style="color: #6c757d;">💾 等待分析数据</h3>
+                <p style="color: #6c757d; font-size: 1.1rem;">完成分析后，这里将提供强大的数据导出功能</p>
+                <div style="background: #fff3cd; padding: 2rem; border-radius: 12px; margin: 2rem 0; text-align: left;">
+                    <h4 style="color: #856404; margin: 0 0 1rem 0;">🚀 开启导出功能步骤</h4>
+                    <div style="color: #856404; line-height: 1.8;">
+                        <div><strong>1. 📄 上传处理:</strong> 在上传页面处理您的文档</div>
+                        <div><strong>2. 📊 生成分析:</strong> 使用各种分析模块</div>
+                        <div><strong>3. 🔍 执行对比:</strong> 在公司对比页面进行分析</div>
+                        <div><strong>4. 📈 AI预测:</strong> 在AI洞察页面生成预测结果</div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
             
             # Show capabilities preview
             st.subheader("📋 导出功能")
@@ -78,7 +90,14 @@ def show_export_page():
             
             return
         
-        # Main export interface
+        # Enhanced tabs layout with modern styling
+        st.markdown("""
+        <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin: 2rem 0;">
+            <h4 style="margin: 0 0 1rem 0; color: #495057;">💾 导出管理中心</h4>
+            <p style="margin: 0; color: #6c757d; font-size: 0.9rem;">选择下方功能管理和导出您的分析数据</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
         tab1, tab2, tab3 = st.tabs(["📊 导出状态", "📦 批量导出", "🔧 单独导出"])
         
         with tab1:
@@ -135,8 +154,13 @@ def show_export_status_tab(export_ui: ExportUI):
         data_types = ['ratios', 'comparison', 'forecasting', 'insights']
         export_ui.show_export_status(data_types)
         
-        # Quick statistics
-        st.subheader("📈 Data Summary")
+        # Enhanced statistics section
+        st.markdown("""
+        <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin: 1.5rem 0;">
+            <h4 style="margin: 0 0 1rem 0; color: #495057;">📈 数据概览统计</h4>
+            <p style="margin: 0; color: #6c757d; font-size: 0.9rem;">当前可导出数据的统计情况</p>
+        </div>
+        """, unsafe_allow_html=True)
         
         col1, col2, col3, col4 = st.columns(4)
         
