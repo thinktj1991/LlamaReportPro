@@ -11,19 +11,47 @@ import logging
 logger = logging.getLogger(__name__)
 
 def show_qa_page():
-    st.header("🤖 问答系统")
-    st.markdown("使用AI智能搜索对您的年报提问")
+    # Enhanced header with AI capabilities showcase
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 2rem; border-radius: 12px; color: white; margin-bottom: 2rem;">
+        <h2>🤖 AI智能问答助手</h2>
+        <p>使用先进的RAG技术，对您的年报文档进行智能问答和深度分析</p>
+        <div style="background: rgba(255,255,255,0.2); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+            <strong>🎆 AI能力:</strong> 中文问答 • 上下文理解 • 多文档搜索 • 深度分析
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Initialize session state safely
     init_state()
     
-    # Check if system is ready
+    # Enhanced empty state checks
     if not st.session_state.processed_documents:
-        st.warning("尚未处理任何文档。请先在“上传与处理”页面上传文档。")
+        st.markdown("""
+        <div style="text-align: center; padding: 3rem; background: #f8f9fa; border-radius: 12px; border: 2px dashed #dee2e6;">
+            <h3 style="color: #6c757d;">📁 需要先处理文档</h3>
+            <p style="color: #6c757d; font-size: 1.1rem;">请先上传并处理您的PDF文档，然后才能使用AI问答功能</p>
+            <div style="margin-top: 2rem;">
+                <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.75rem 2rem; border-radius: 25px; border: none; cursor: pointer;">
+                    🚀 去上传文档
+                </button>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         return
     
     if not st.session_state.rag_index:
-        st.warning("搜索索引尚未构建。请重新处理您的文档。")
+        st.markdown("""
+        <div style="text-align: center; padding: 2rem; background: #fff3cd; border-radius: 12px; border-left: 4px solid #ffeaa7;">
+            <h3 style="color: #856404;">🔍 智能索引正在构建中</h3>
+            <p style="color: #856404;">系统正在对您的文档进行智能分析，请稍后刷新页面</p>
+            <div style="margin-top: 1rem;">
+                <div style="width: 100%; background: #f0f0f0; border-radius: 10px; height: 10px;">
+                    <div style="width: 60%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); height: 100%; border-radius: 10px;"></div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         return
     
     # Initialize processors including RAG system and visualizer
@@ -31,10 +59,15 @@ def show_qa_page():
         st.error("初始化问答系统组件失败")
         return
     
-    # Check API key
+    # Enhanced API key check
     openai_key = os.getenv("OPENAI_API_KEY")
     if not openai_key or openai_key == "default_key":
-        st.error("🔑 OpenAI API密钥未配置。请设置OPENAI_API_KEY环境变量。")
+        st.markdown("""
+        <div style="background: #f8d7da; color: #721c24; padding: 2rem; border-radius: 12px; border-left: 4px solid #f5c6cb; text-align: center;">
+            <h3 style="margin: 0 0 1rem 0;">🔑 需要配置API密钥</h3>
+            <p style="margin: 0;">请联系管理员配置OpenAI API密钥后再使用AI问答功能</p>
+        </div>
+        """, unsafe_allow_html=True)
         return
     
     # System status
@@ -51,28 +84,65 @@ def show_qa_page():
 
 def show_system_status():
     """
-    Display RAG system status
+    Display enhanced RAG system status
     """
-    st.subheader("🔍 系统状态")
-    
     try:
         # Get index statistics
         index_stats = st.session_state.rag_system.get_index_stats()
         
+        # Enhanced system status display
+        st.markdown("""
+        <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin: 2rem 0;">
+            <h4 style="margin: 0 0 1rem 0; color: #495057;">🔍 AI系统状态监控</h4>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Status metrics with enhanced styling
         col1, col2, col3, col4 = st.columns(4)
         
+        # Index status
         with col1:
-            st.metric("索引状态", index_stats.get('status', '未知'))
+            status = index_stats.get('status', '未知')
+            status_color = "#28a745" if status == "Active" else "#dc3545"
+            st.markdown("""
+            <div style="background: {}; padding: 1rem; border-radius: 8px; color: white; text-align: center;">
+                <h3 style="margin: 0; font-size: 1.2rem;">{}</h3>
+                <p style="margin: 0.5rem 0 0 0; opacity: 0.9;">📊 索引状态</p>
+            </div>
+            """.format(status_color, status), unsafe_allow_html=True)
         
+        # Document count
         with col2:
-            st.metric("文档总数", index_stats.get('total_documents', 0))
+            doc_count = index_stats.get('total_documents', 0)
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); padding: 1rem; border-radius: 8px; color: white; text-align: center;">
+                <h3 style="margin: 0; font-size: 1.5rem;">{}</h3>
+                <p style="margin: 0.5rem 0 0 0; opacity: 0.9;">📄 索引文档</p>
+            </div>
+            """.format(doc_count), unsafe_allow_html=True)
         
+        # Query engine status
         with col3:
-            query_engine_status = "✅ 就绪" if index_stats.get('has_query_engine', False) else "❌ 未就绪"
-            st.metric("查询引擎", query_engine_status)
+            has_engine = index_stats.get('has_query_engine', False)
+            engine_color = "#28a745" if has_engine else "#dc3545"
+            engine_text = "✅ 就绪" if has_engine else "❌ 未就绪"
+            st.markdown("""
+            <div style="background: {}; padding: 1rem; border-radius: 8px; color: white; text-align: center;">
+                <h3 style="margin: 0; font-size: 1.2rem;">{}</h3>
+                <p style="margin: 0.5rem 0 0 0; opacity: 0.9;">🤖 查询引擎</p>
+            </div>
+            """.format(engine_color, engine_text), unsafe_allow_html=True)
         
+        # Document types or additional info
         with col4:
             doc_types = index_stats.get('document_types', {})
+            total_types = len(doc_types) if doc_types else 0
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); padding: 1rem; border-radius: 8px; color: white; text-align: center;">
+                <h3 style="margin: 0; font-size: 1.5rem;">{}</h3>
+                <p style="margin: 0.5rem 0 0 0; opacity: 0.9;">📂 文档类型</p>
+            </div>
+            """.format(total_types), unsafe_allow_html=True)
             financial_docs = doc_types.get('table_data', 0)
             st.metric("财务表格", financial_docs)
         
