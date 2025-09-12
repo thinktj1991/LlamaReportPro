@@ -85,7 +85,7 @@ def show_comparison_setup():
             "选择要对比的公司：",
             options=available_companies,
             default=available_companies[:min(3, len(available_companies))],
-            help="Select 2 or more companies for comparison"
+            help="选择两家或更多公司进行对比"
         )
     
     with col2:
@@ -98,7 +98,7 @@ def show_comparison_setup():
             "选择要对比的指标：",
             options=available_metrics,
             default=available_metrics[:min(5, len(available_metrics))],
-            help="Choose financial metrics for comparison"
+            help="选择财务指标进行对比"
         )
     
     # Store selections in session state

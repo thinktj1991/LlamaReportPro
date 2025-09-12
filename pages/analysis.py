@@ -83,10 +83,10 @@ def show_table_analysis():
     """
     Show detailed table analysis
     """
-    st.subheader("🔍 Table Extraction Analysis")
+    st.subheader("🔍 表格提取分析")
     
     if not st.session_state.extracted_tables:
-        st.warning("No tables extracted yet.")
+        st.warning("尚未提取任何表格。")
         return
     
     # Table distribution chart
@@ -96,10 +96,10 @@ def show_table_analysis():
         )
         st.plotly_chart(table_fig, use_container_width=True)
     except Exception as e:
-        st.error(f"Error creating table distribution chart: {str(e)}")
+        st.error(f"创建表格分布图表错误：{str(e)}")
     
     # Table filtering options
-    st.subheader("🔧 Table Filters")
+    st.subheader("🔧 表格筛选器")
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -118,13 +118,13 @@ def show_table_analysis():
     filtered_tables = filter_tables(selected_doc, show_financial_only, min_importance)
     
     if filtered_tables:
-        st.subheader(f"📊 Filtered Tables ({len(filtered_tables)} found)")
+        st.subheader(f"📊 筛选表格（共找到 {len(filtered_tables)} 个）")
         
         for i, table in enumerate(filtered_tables):
-            with st.expander(f"Table {i+1}: {table['table_id']} (Score: {table['importance_score']:.2f})"):
+            with st.expander(f"表格 {i+1}: {table['table_id']} (评分: {table['importance_score']:.2f})"):
                 show_table_details(table)
     else:
-        st.info("No tables match the current filters.")
+        st.info("没有表格符合当前筛选条件。")
 
 def show_financial_metrics():
     """
@@ -159,10 +159,10 @@ def show_financial_metrics():
             financial_fig = st.session_state.visualizer.create_financial_metrics_chart(consolidated_table)
             st.plotly_chart(financial_fig, use_container_width=True)
         except Exception as e:
-            st.error(f"Error creating financial metrics chart: {str(e)}")
+            st.error(f"创建财务指标图表错误：{str(e)}")
         
         # Consolidated table display
-        st.subheader("📋 Consolidated Financial Data")
+        st.subheader("📋 综合财务数据")
         
         # Table filtering
         col1, col2 = st.columns(2)

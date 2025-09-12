@@ -101,7 +101,7 @@ def show_insights_page():
             
     except Exception as e:
         logger.error(f"Error in insights page: {str(e)}")
-        st.error("Error loading insights page. Please refresh and try again.")
+        st.error("加载洞察页面错误。请刷新页面并重试。")
         st.exception(e)
 
 def show_anomaly_detection():
@@ -109,18 +109,18 @@ def show_anomaly_detection():
     Show anomaly detection analysis
     """
     try:
-        st.subheader("🔍 Financial Anomaly Detection")
-        st.markdown("Machine learning-powered detection of unusual financial patterns and outliers")
+        st.subheader("🔍 财务异常检测")
+        st.markdown("基于机器学习的异常财务模式和离群值检测")
         
         # Run anomaly detection
-        with st.spinner("Analyzing financial data for anomalies..."):
+        with st.spinner("正在分析财务数据以检测异常..."):
             anomalies = st.session_state.insights_engine.detect_financial_anomalies(
                 st.session_state.company_data
             )
         
         if not anomalies.get('anomalies'):
-            st.success("✅ No significant anomalies detected in the financial data")
-            st.info(anomalies.get('analysis', 'All companies show normal financial patterns'))
+            st.success("✅ 财务数据中未检测到显著异常")
+            st.info(anomalies.get('analysis', '\u6240\u6709\u516c\u53f8\u5747\u8868\u73b0\u51fa\u6b63\u5e38\u7684\u8d22\u52a1\u6a21\u5f0f'))
             return
         
         # Display anomaly results
@@ -512,9 +512,9 @@ def show_forecasting_analysis():
         
         with col1:
             forecast_metric = st.selectbox(
-                "Select Metric to Forecast",
+                "选择要预测的指标",
                 ['revenue', 'profit', 'total_assets', 'operating_income', 'net_income'],
-                help="Choose the financial metric for time-series forecasting"
+                help="选择用于时间序列预测的财务指标"
             )
         
         with col2:

@@ -386,10 +386,10 @@ def show_ratio_comparison():
         return
     
     selected_companies = st.multiselect(
-        "Select Companies for Ratio Comparison:",
+        "选择进行比率对比的公司：",
         options=available_companies,
         default=available_companies[:min(3, len(available_companies))],
-        help="Choose 2 or more companies to compare financial ratios"
+        help="选择两家或更多公司来对比财务比率"
     )
     
     if len(selected_companies) >= 2:
@@ -575,5 +575,5 @@ def show_ratio_library():
                 st.markdown("---")
 
 # Call the main function to render the page when executed by Streamlit's multipage system
-if __name__ == "__main__" or True:  # Always execute when this page is loaded
+if __name__ == "__main__":
     show_ratio_analysis_page()

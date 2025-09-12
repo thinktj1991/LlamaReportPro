@@ -63,23 +63,23 @@ def show_export_page():
                 st.info("""
                 **📊 支持的格式：**
                 - **CSV**: 原始数据和计算结果
-                - **Excel**: Formatted workbooks with multiple sheets
-                - **PDF**: Professional analysis reports
+                - **Excel**: 格式化的工作簿，包含多个工作表
+                - **PDF**: 专业分析报告
                 """)
             
             with col2:
                 st.info("""
-                **📈 Available Data Types:**
-                - Financial ratio analysis
-                - Multi-company comparisons
-                - Time-series forecasts
-                - AI insights and anomalies
+                **📈 可用数据类型：**
+                - 财务比率分析
+                - 多公司对比
+                - 时间序列预测
+                - AI洞察和异常检测
                 """)
             
             return
         
         # Main export interface
-        tab1, tab2, tab3 = st.tabs(["📊 Export Status", "📦 Batch Export", "🔧 Individual Exports"])
+        tab1, tab2, tab3 = st.tabs(["📊 导出状态", "📦 批量导出", "🔧 单独导出"])
         
         with tab1:
             show_export_status_tab(export_ui)
@@ -91,26 +91,26 @@ def show_export_page():
             show_individual_exports_tab(export_ui)
         
         # Export tips and information
-        with st.expander("💡 Export Tips & Information"):
+        with st.expander("💡 导出提示与信息"):
             st.markdown("""
-            **📝 Export Format Guidelines:**
+            **📝 导出格式指南：**
             
-            **CSV (Comma Separated Values):**
-            - Best for: Data analysis in other tools (Excel, R, Python)
-            - Contains: Raw numerical data and calculations
-            - Size: Smallest file size
+            **CSV (逗号分隔值)：**
+            - 适用于：在其他工具中进行数据分析（Excel、R、Python）
+            - 包含：原始数值数据和计算结果
+            - 大小：最小文件大小
             - Use case: Further analysis, database imports
             
             **Excel (XLSX):**
-            - Best for: Formatted reports and presentations
-            - Contains: Multiple worksheets, formatted tables, basic charts
-            - Size: Medium file size
+            - 适用于：格式化报告和演示
+            - 包含：多个工作表、格式化表格、基本图表
+            - 大小：中等文件大小
             - Use case: Business reports, stakeholder presentations
             
             **PDF (Portable Document Format):**
-            - Best for: Final reports and documentation
-            - Contains: Professional layout with analysis narratives
-            - Size: Largest file size (includes text and layout)
+            - 适用于：最终报告和文档
+            - 包含：专业布局和分析论述
+            - 大小：最大文件大小（包含文本和布局）
             - Use case: Executive summaries, formal documentation
             
             **💡 Best Practices:**
@@ -180,7 +180,7 @@ def show_batch_export_tab(export_ui: ExportUI):
         export_ui.show_batch_export_panel()
         
         # Batch export benefits
-        st.subheader("🎯 Batch Export Benefits")
+        st.subheader("🎯 批量导出优势")
         
         col1, col2 = st.columns(2)
         

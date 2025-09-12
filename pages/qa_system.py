@@ -65,55 +65,62 @@ def show_system_status():
             st.metric("索引状态", index_stats.get('status', '未知'))
         
         with col2:
-            st.metric("Total Documents", index_stats.get('total_documents', 0))
+            st.metric("文档总数", index_stats.get('total_documents', 0))
         
         with col3:
-            query_engine_status = "✅ Ready" if index_stats.get('has_query_engine', False) else "❌ Not Ready"
-            st.metric("Query Engine", query_engine_status)
+            query_engine_status = "✅ 就绪" if index_stats.get('has_query_engine', False) else "❌ 未就绪"
+            st.metric("查询引擎", query_engine_status)
         
         with col4:
             doc_types = index_stats.get('document_types', {})
             financial_docs = doc_types.get('table_data', 0)
-            st.metric("Financial Tables", financial_docs)
+            st.metric("财务表格", financial_docs)
         
         # Show document types breakdown
         if doc_types:
-            st.write("**Document Types in Index:**")
+            st.write("**索引中的文档类型：**")
+            # Map internal codes to Chinese labels
+            doc_type_labels = {
+                'table_data': '财务表格',
+                'text_content': '文本内容',
+                'pdf_content': 'PDF内容'
+            }
             for doc_type, count in doc_types.items():
-                st.write(f"• {doc_type.replace('_', ' ').title()}: {count}")
+                chinese_label = doc_type_labels.get(doc_type, doc_type)
+                st.write(f"• {chinese_label}: {count}")
     
     except Exception as e:
-        st.error(f"Error getting system status: {str(e)}")
+        st.error(f"获取系统状态错误：{str(e)}")
 
 def show_question_interface():
     """
     Main question and answer interface
     """
-    st.subheader("💬 Ask Questions")
+    st.subheader("💬 提问问题")
     
     # Query context options
-    with st.expander("🔧 Query Options", expanded=False):
+    with st.expander("🔧 查询选项", expanded=False):
         col1, col2, col3 = st.columns(3)
         
         with col1:
             company_filter = st.selectbox(
-                "Focus on Company:",
-                ["All Companies"] + list(st.session_state.company_data.keys()),
-                help="Filter responses to focus on a specific company"
+                "聚焦公司：",
+                ["所有公司"] + list(st.session_state.company_data.keys()),
+                help="筛选回答以聚焦特定公司"
             )
         
         with col2:
             doc_type_filter = st.selectbox(
-                "Document Type:",
-                ["All Types", "Financial Tables", "Text Content"],
-                help="Filter by document type"
+                "文档类型：",
+                ["所有类型", "财务表格", "文本内容"],
+                help="按文档类型筛选"
             )
         
         with col3:
             year_filter = st.text_input(
-                "Year Focus:",
-                placeholder="e.g., 2023",
-                help="Focus on specific year if available"
+                "年份聚焦：",
+                placeholder="例：2023",
+                help="如果有的话，聚焦特定年份"
             )
     
     # Question input
@@ -142,13 +149,14 @@ def ask_question(question, company_filter, doc_type_filter, year_filter):
         # Prepare context filter
         context_filter = {}
         
-        if company_filter != "All Companies":
+        if company_filter != "所有公司":
             context_filter['company'] = company_filter
         
-        if doc_type_filter != "All Types":
-            if doc_type_filter == "Financial Tables":
+        if doc_type_filter != "所有类型":
+            # Map Chinese UI labels to internal codes
+            if doc_type_filter == "财务表格":
                 context_filter['document_type'] = 'table_data'
-            elif doc_type_filter == "Text Content":
+            elif doc_type_filter == "文本内容":
                 context_filter['document_type'] = 'text_content'
         
         if year_filter.strip():

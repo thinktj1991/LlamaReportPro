@@ -50,9 +50,8 @@ def main():
         from pages.comparison import show_comparison_page
         show_comparison_page()
     elif page == "比率分析":
-        # Note: This routing is handled by Streamlit's multipage system
-        # The pages/ratio_analysis.py file is executed directly
-        st.info("正在导航到比率分析页面... (由Streamlit多页面系统处理)")
+        from pages.ratio_analysis import show_ratio_analysis_page
+        show_ratio_analysis_page()
     elif page == "AI洞察":
         from pages.insights import show_insights_page
         show_insights_page()
