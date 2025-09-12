@@ -11,8 +11,16 @@ import logging
 logger = logging.getLogger(__name__)
 
 def show_upload_page():
-    st.header("📁 上传与处理文档")
-    st.markdown("上传年报和其他财务文档进行分析")
+    # Enhanced header with progress indication
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 2rem; border-radius: 12px; color: white; margin-bottom: 2rem;">
+        <h2>📁 文档上传与处理</h2>
+        <p>上传您的PDF年报文档，让AI帮您进行智能分析</p>
+        <div style="background: rgba(255,255,255,0.2); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+            <strong>✨ 支持功能:</strong> PDF文本提取 • 财务表格识别 • 公司信息提取 • 智能问答索引
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Initialize session state safely
     init_state()
@@ -22,25 +30,79 @@ def show_upload_page():
         st.error("初始化处理组件失败")
         return
     
-    # File upload section
-    st.subheader("📤 上传文档")
+    # Enhanced file upload section
+    st.subheader("📤 选择您的文档")
+    
+    # Upload tips
+    with st.expander("💡 上传提示", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("""
+            **支持的文档类型:**
+            - ✅ 年度报告 (Annual Reports)
+            - ✅ 财务报告 (Financial Statements) 
+            - ✅ 公司报告 (Company Reports)
+            - ✅ 中英文PDF文档
+            """)
+        with col2:
+            st.markdown("""
+            **最佳实践:**
+            - ✨ 文件大小: 小于200MB
+            - ✨ 文档质量: 高清PDF文档
+            - ✨ 文档结构: 包含财务表格
+            - ✨ 命名规范: 使用有意义的文件名
+            """)
+    
+    # File uploader with enhanced styling
     uploaded_files = st.file_uploader(
-        "选择PDF文件",
+        "拖放PDF文件到这里，或点击浏览选择",
         type=['pdf'],
         accept_multiple_files=True,
-        help="上传年报、财务报表或其他PDF文档"
+        help="支持多个文件同时上传，系统会自动进行批量处理"
     )
     
     if uploaded_files:
-        col1, col2 = st.columns([3, 1])
+        # Enhanced file preview section
+        st.markdown("""
+        <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #28a745; margin: 1rem 0;">
+            <h4 style="margin: 0 0 1rem 0; color: #28a745;">✅ 文件上传成功</h4>
+            <p style="margin: 0; color: #6c757d;">已选择 {} 个文件，准备进行智能处理</p>
+        </div>
+        """.format(len(uploaded_files)), unsafe_allow_html=True)
         
-        with col1:
-            st.info(f"已选择 {len(uploaded_files)} 个文件")
-            for file in uploaded_files:
-                st.write(f"• {file.name} ({file.size:,} 字节)")
+        # File details with enhanced UI
+        with st.expander(f"📊 查看文件详情 ({len(uploaded_files)} 个文件)", expanded=len(uploaded_files) <= 3):
+            for i, file in enumerate(uploaded_files, 1):
+                col1, col2, col3 = st.columns([0.5, 3, 1.5])
+                with col1:
+                    st.markdown(f"**{i}.**")
+                with col2:
+                    st.markdown(f"**{file.name}**")
+                with col3:
+                    file_size = file.size / (1024*1024)  # Convert to MB
+                    if file_size < 1:
+                        st.markdown(f"📄 {file.size:,} 字节")
+                    else:
+                        st.markdown(f"📄 {file_size:.1f} MB")
+        
+        # Enhanced action section
+        st.markdown("<br>", unsafe_allow_html=True)
+        col1, col2, col3 = st.columns([1, 2, 1])
         
         with col2:
-            process_button = st.button("🚀 处理所有文件", type="primary", use_container_width=True)
+            st.markdown("""
+            <div style="text-align: center; padding: 1rem; background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%); border-radius: 8px; margin-bottom: 1rem;">
+                <h4 style="margin: 0; color: white;">🚀 准备开始处理</h4>
+                <p style="margin: 0.5rem 0 0 0; color: white; opacity: 0.9;">点击下方按钮开始智能分析</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            process_button = st.button(
+                "🎆 开始智能分析", 
+                type="primary", 
+                use_container_width=True,
+                help="点击开始对所有上传的PDF文档进行处理"
+            )
         
         if process_button:
             process_uploaded_files(uploaded_files)
@@ -53,11 +115,38 @@ def show_upload_page():
 
 def process_uploaded_files(uploaded_files):
     """
-    Process all uploaded files with validation
+    Process all uploaded files with enhanced user experience
     """
     total_files = len(uploaded_files)
-    progress_bar = st.progress(0)
+    
+    # Enhanced processing header
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); padding: 2rem; border-radius: 12px; color: white; text-align: center; margin: 2rem 0;">
+        <h2>🔧 正在处理您的文档</h2>
+        <p>请耐心等待，我们正在使用AI技术分析您的文档...</p>
+        <p><strong>处理步骤:</strong> 文件验证 → 内容提取 → 表格识别 → 智能索引</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Progress tracking
+    progress_col1, progress_col2 = st.columns([3, 1])
+    with progress_col1:
+        progress_bar = st.progress(0)
+    with progress_col2:
+        progress_text = st.empty()
+    
     status_text = st.empty()
+    
+    # Processing stages indicator
+    stages_container = st.container()
+    with stages_container:
+        stage_col1, stage_col2, stage_col3, stage_col4 = st.columns(4)
+        stage_indicators = [stage_col1.empty(), stage_col2.empty(), stage_col3.empty(), stage_col4.empty()]
+        
+        # Initialize stage indicators
+        stage_names = ["🔍 文件验证", "📄 内容提取", "📊 表格识别", "🤖 智能索引"]
+        for i, indicator in enumerate(stage_indicators):
+            indicator.info(stage_names[i])
     
     # Track validation and processing results
     validation_results = []
@@ -66,7 +155,9 @@ def process_uploaded_files(uploaded_files):
     
     try:
         # Step 1: Validate all files first
-        status_text.text("🔍 正在验证上传的文件...")
+        stage_indicators[0].success("🔍 正在验证...")
+        status_text.info("🔍 正在验证上传的文件...")
+        progress_text.text("1/4")
         
         for uploaded_file in uploaded_files:
             is_valid, error_message = validate_pdf_file(uploaded_file)
@@ -88,14 +179,23 @@ def process_uploaded_files(uploaded_files):
             st.error("❌ 没有有效的文件可以处理。请检查上方的验证错误并上传有效的PDF文件。")
             return
         
+        # Update stage indicators
+        stage_indicators[0].success("✅ 验证完成")
+        stage_indicators[1].warning("📄 正在处理...")
+        progress_text.text("2/4")
+        
         # Step 2: Process only valid files
-        st.info(f"📋 正在处理 {len(valid_files)} 个有效文件（共上传 {total_files} 个文件）...")
+        status_text.success(f"✅ 验证完成！正在处理 {len(valid_files)} 个有效文件")
         
         for i, uploaded_file in enumerate(valid_files):
             try:
-                status_text.text(f"正在处理 {uploaded_file.name}...")
+                current_progress = (i + 1) / len(valid_files) * 0.6 + 0.1  # 10% to 70%
+                progress_bar.progress(current_progress)
+                progress_text.text(f"2/4 ({i+1}/{len(valid_files)})")
                 
-                with st.spinner(f"正在处理 {uploaded_file.name}..."):
+                status_text.info(f"📄 正在处理: {uploaded_file.name}")
+                
+                with st.spinner(f"🚀 正在处理 {uploaded_file.name}..."):
                     # Process PDF
                     processed_data = st.session_state.pdf_processor.process_uploaded_file(uploaded_file)
                     
@@ -118,9 +218,13 @@ def process_uploaded_files(uploaded_files):
                         'error_message': None
                     })
                     
+                    # Show progress for current file
+                    st.success(f"✅ {uploaded_file.name} 处理完成")
+                    
             except Exception as file_error:
                 error_msg = f"Error processing {uploaded_file.name}: {str(file_error)}"
                 logger.error(error_msg)
+                st.error(f"❌ {uploaded_file.name} 处理失败: {str(file_error)}")
                 processing_results.append({
                     'filename': uploaded_file.name,
                     'success': False,
