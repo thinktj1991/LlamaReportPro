@@ -17,56 +17,67 @@ def init_state():
     Call this at the top of every page to prevent AttributeError crashes.
     """
     try:
+        # Ensure session_state exists and is properly initialized
+        if not hasattr(st, 'session_state'):
+            logger.error("Streamlit session_state not available")
+            return False
+        
         # Document processing state
-        if 'processed_documents' not in st.session_state:
+        if not hasattr(st.session_state, 'processed_documents') or st.session_state.processed_documents is None:
             st.session_state.processed_documents = {}
         
-        if 'extracted_tables' not in st.session_state:
+        if not hasattr(st.session_state, 'extracted_tables') or st.session_state.extracted_tables is None:
             st.session_state.extracted_tables = {}
         
         # RAG system state
-        if 'rag_index' not in st.session_state:
+        if not hasattr(st.session_state, 'rag_index'):
             st.session_state.rag_index = None
         
-        if 'query_history' not in st.session_state:
+        if not hasattr(st.session_state, 'query_history') or st.session_state.query_history is None:
             st.session_state.query_history = []
         
         # Company analysis state
-        if 'company_data' not in st.session_state:
+        if not hasattr(st.session_state, 'company_data') or st.session_state.company_data is None:
             st.session_state.company_data = {}
         
         # Processing components - initialize lazily to avoid import errors
-        if 'pdf_processor' not in st.session_state:
+        if not hasattr(st.session_state, 'pdf_processor'):
             st.session_state.pdf_processor = None
         
-        if 'table_extractor' not in st.session_state:
+        if not hasattr(st.session_state, 'table_extractor'):
             st.session_state.table_extractor = None
         
-        if 'rag_system' not in st.session_state:
+        if not hasattr(st.session_state, 'rag_system'):
             st.session_state.rag_system = None
         
-        if 'company_comparator' not in st.session_state:
+        if not hasattr(st.session_state, 'company_comparator'):
             st.session_state.company_comparator = None
         
-        if 'data_visualizer' not in st.session_state:
+        if not hasattr(st.session_state, 'data_visualizer'):
             st.session_state.data_visualizer = None
         
         # Backward compatibility - some pages use 'visualizer' key
-        if 'visualizer' not in st.session_state:
+        if not hasattr(st.session_state, 'visualizer'):
             st.session_state.visualizer = None
         
         # Processing status flags
-        if 'processing_complete' not in st.session_state:
+        if not hasattr(st.session_state, 'processing_complete'):
             st.session_state.processing_complete = False
         
-        if 'last_upload_time' not in st.session_state:
+        if not hasattr(st.session_state, 'last_upload_time'):
             st.session_state.last_upload_time = None
             
         logger.debug("Session state initialized successfully")
+        return True
         
     except Exception as e:
         logger.error(f"Error initializing session state: {str(e)}")
-        st.error("Error initializing application state")
+        # Try to show error only if st.error is available
+        try:
+            st.error("Error initializing application state")
+        except:
+            pass
+        return False
 
 def init_processors():
     """
