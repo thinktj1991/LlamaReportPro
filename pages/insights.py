@@ -15,6 +15,7 @@ from utils.insights_engine import InsightsEngine
 from utils.forecasting_engine import ForecastingEngine
 from utils.forecasting_viz import ForecastingVisualizer
 from utils.state import init_state, init_processors
+from utils.export_ui import add_export_section
 import logging
 
 # Configure logging
@@ -373,6 +374,18 @@ def show_ai_insights():
         if anomaly_count > 0:
             st.info(f"🔍 **{anomaly_count} anomaly-related insights** detected - investigate unusual patterns")
         
+        # Add export functionality for AI insights
+        st.divider()
+        insights_data = {
+            'insights': insights,
+            'summary': {
+                'risk_count': risk_count,
+                'performance_count': performance_count,
+                'anomaly_count': anomaly_count
+            }
+        }
+        add_export_section('insights', insights_data)
+        
     except Exception as e:
         logger.error(f"Error generating AI insights: {str(e)}")
         st.error(f"Error generating AI insights: {str(e)}")
@@ -707,6 +720,11 @@ def show_forecasting_analysis():
             - Consider external factors (market conditions, regulatory changes) not captured in the model
             - Use forecasts as guidance, not absolute predictions
             """)
+        
+        # Add export functionality for forecasts
+        if hasattr(st.session_state, 'forecasts') and st.session_state.forecasts:
+            st.divider()
+            add_export_section('forecasting', st.session_state.forecasts)
         
     except Exception as e:
         logger.error(f"Error in forecasting analysis: {str(e)}")

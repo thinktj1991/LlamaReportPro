@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from utils.financial_calculator import FinancialCalculator
 from utils.state import init_state, init_processors
+from utils.export_ui import add_export_section
 import logging
 
 # Configure logging
@@ -68,6 +69,11 @@ def show_ratio_analysis_page():
             except Exception as e:
                 logger.error(f"Error in ratio library: {str(e)}")
                 st.error(f"Error loading ratio library: {str(e)}")
+        
+        # Add export functionality for calculated ratios
+        if hasattr(st.session_state, 'calculated_ratios') and st.session_state.calculated_ratios:
+            st.divider()
+            add_export_section('ratios', st.session_state.calculated_ratios)
                 
     except Exception as e:
         logger.error(f"Critical error in ratio analysis page: {str(e)}")
