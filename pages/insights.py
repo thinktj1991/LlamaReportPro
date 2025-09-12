@@ -23,11 +23,19 @@ logger = logging.getLogger(__name__)
 
 def show_insights_page():
     """
-    Main insights analysis page
+    Main insights analysis page with enhanced UI/UX
     """
     try:
-        st.header("🤖 AI智能洞察与分析")
-        st.markdown("高级模式识别、异常检测和自动化智能分析")
+        # Enhanced header with AI capabilities showcase
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 2rem; border-radius: 12px; color: white; margin-bottom: 2rem;">
+            <h2>🤖 AI智能洞察与分析引擎</h2>
+            <p>运用先进的机器学习算法和模式识别技术，为您的财务数据提供深度洞察和预测性分析</p>
+            <div style="background: rgba(255,255,255,0.2); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+                <strong>🧠 AI能力:</strong> 异常检测 • 风险评估 • 模式识别 • 智能预测 • 自动化洞察
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         
         # Initialize session state safely
         init_state()
@@ -78,7 +86,14 @@ def show_insights_page():
         if not hasattr(st.session_state, 'forecasting_viz') or st.session_state.forecasting_viz is None:
             st.session_state.forecasting_viz = ForecastingVisualizer()
         
-        # Main content tabs
+        # Enhanced tabs layout with modern styling
+        st.markdown("""
+        <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin: 2rem 0;">
+            <h4 style="margin: 0 0 1rem 0; color: #495057;">🧠 AI分析工具箱</h4>
+            <p style="margin: 0; color: #6c757d; font-size: 0.9rem;">选择不同的AI分析模块深入洞察您的财务数据</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "🔍 异常检测", "⚠️ 风险分析", 
             "🤖 AI洞察", "📊 模式分析", "📈 时间序列预测"
@@ -106,11 +121,15 @@ def show_insights_page():
 
 def show_anomaly_detection():
     """
-    Show anomaly detection analysis
+    Show enhanced anomaly detection analysis
     """
     try:
-        st.subheader("🔍 财务异常检测")
-        st.markdown("基于机器学习的异常财务模式和离群值检测")
+        st.markdown("""
+        <div style="background: #f8f9fa; padding: 2rem; border-radius: 12px; margin: 2rem 0;">
+            <h3 style="margin: 0 0 1rem 0; color: #495057;">🔍 智能异常检测系统</h3>
+            <p style="margin: 0; color: #6c757d;">运用孤立森林算法和机器学习技术识别不寻常的财务模式和潜在风险信号</p>
+        </div>
+        """, unsafe_allow_html=True)
         
         # Run anomaly detection
         with st.spinner("正在分析财务数据以检测异常..."):
