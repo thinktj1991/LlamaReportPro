@@ -164,52 +164,105 @@ def show_system_status():
 
 def show_question_interface():
     """
-    Main question and answer interface
+    Enhanced question and answer interface
     """
-    st.subheader("💬 提问问题")
+    st.markdown("""
+    <div style="background: #f8f9fa; padding: 2rem; border-radius: 12px; margin: 2rem 0;">
+        <h3 style="margin: 0 0 1rem 0; color: #495057;">💬 智能问答交互</h3>
+        <p style="margin: 0; color: #6c757d;">在下方输入您的问题，AI会基于您的文档内容提供准确的答案</p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Query context options
-    with st.expander("🔧 查询选项", expanded=False):
+    # Enhanced query context options
+    with st.expander("⚙️ 高级查询选项", expanded=False):
+        st.markdown("""
+        <div style="background: #e3f2fd; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+            <strong>🎯 查询精准度提升:</strong> 使用下方选项让AI更精准地理解您的问题
+        </div>
+        """, unsafe_allow_html=True)
+        
         col1, col2, col3 = st.columns(3)
         
         with col1:
+            st.markdown("**🏢 公司筛选**")
+            company_data = st.session_state.get('company_data', {})
+            company_options = ["所有公司"] + list(company_data.keys()) if company_data else ["所有公司"]
             company_filter = st.selectbox(
-                "聚焦公司：",
-                ["所有公司"] + list(st.session_state.company_data.keys()),
-                help="筛选回答以聚焦特定公司"
+                "聚焦特定公司：",
+                company_options,
+                help="选择特定公司可以获得更精准的答案"
             )
         
         with col2:
+            st.markdown("**📂 数据类型**")
             doc_type_filter = st.selectbox(
-                "文档类型：",
+                "限制数据源：",
                 ["所有类型", "财务表格", "文本内容"],
-                help="按文档类型筛选"
+                help="选择数据源类型可以提高相关性"
             )
         
         with col3:
+            st.markdown("**📅 时间范围**")
             year_filter = st.text_input(
-                "年份聚焦：",
-                placeholder="例：2023",
-                help="如果有的话，聚焦特定年份"
+                "指定年份：",
+                placeholder="例: 2023",
+                help="输入年份可以获得该年份的具体数据"
             )
     
-    # Question input
+    # Enhanced question input interface
+    st.markdown("""
+    <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin: 2rem 0;">
+        <h4 style="margin: 0 0 1rem 0; color: #495057;">🎯 输入您的问题</h4>
+        <p style="margin: 0 0 1rem 0; color: #6c757d; font-size: 0.9rem;">您可以用中文或英文提问，支持复杂的多层次问题</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Check for temp question from examples
+    initial_question = ""
+    if hasattr(st.session_state, 'temp_question'):
+        initial_question = st.session_state.temp_question
+        del st.session_state.temp_question
+    
+    # Question input with enhanced styling
     question = st.text_area(
-        "Enter your question:",
-        placeholder="e.g., What was the company's revenue in the latest annual report?",
-        height=100,
-        help="Ask specific questions about financial data, company performance, or any content in the documents"
+        "请输入您的问题：",
+        value=initial_question,
+        placeholder="例如：\n• 公司在最新年报中的总收入是多少？\n• 主要的财务指标表现如何？\n• 有哪些风险因素需要关注？\n• What are the key business segments mentioned in the report?",
+        height=120,
+        help="您可以问关于财务数据、公司表现、或文档中任何内容的具体问题"
     )
     
-    # Ask button
-    col1, col2 = st.columns([3, 1])
-    with col2:
-        ask_button = st.button("🚀 Ask Question", type="primary", use_container_width=True)
+    # Enhanced action buttons
+    button_col1, button_col2, button_col3 = st.columns([2, 1, 1])
+    
+    with button_col2:
+        ask_button = st.button(
+            "🎆 发送问题", 
+            type="primary", 
+            use_container_width=True,
+            help="点击发送问题给AI助手"
+        )
+    
+    with button_col3:
+        clear_button = st.button(
+            "🗑️ 清空", 
+            use_container_width=True,
+            help="清除当前输入的问题"
+        )
+    
+    # Handle button actions
+    if clear_button:
+        st.rerun()
     
     if ask_button and question.strip():
         ask_question(question, company_filter, doc_type_filter, year_filter)
     elif ask_button:
-        st.warning("Please enter a question first.")
+        st.markdown("""
+        <div style="background: #fff3cd; color: #856404; padding: 1rem; border-radius: 8px; border-left: 4px solid #ffeaa7;">
+            <strong>⚠️ 请输入问题</strong><br>
+            请在上方文本框中输入您想要咨询的问题
+        </div>
+        """, unsafe_allow_html=True)
 
 def ask_question(question, company_filter, doc_type_filter, year_filter):
     """
@@ -323,79 +376,186 @@ def show_related_content(question):
 
 def show_query_history():
     """
-    Display query history
+    Display enhanced query history
     """
+    st.markdown("""
+    <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin: 2rem 0;">
+        <h4 style="margin: 0 0 1rem 0; color: #495057;">📜 查询历史记录</h4>
+        <p style="margin: 0; color: #6c757d;">查看您之前的提问和回答，方便追踪分析进度</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
     if 'query_history' not in st.session_state:
         st.session_state.query_history = []
     
     if st.session_state.query_history:
-        st.subheader("📋 Query History")
         
-        # Show recent queries
-        for i, query_record in enumerate(reversed(st.session_state.query_history[-5:])):
-            with st.expander(f"Query {len(st.session_state.query_history) - i}: {query_record['question'][:50]}..."):
-                st.write(f"**Question:** {query_record['question']}")
-                st.write(f"**Answer:** {query_record['answer'][:300]}...")
+        # Enhanced history display with management buttons
+        history_col1, history_col2 = st.columns([3, 1])
+        
+        with history_col2:
+            if st.button("🗑️ 清空历史", use_container_width=True, help="清除所有查询历史"):
+                st.session_state.query_history = []
+                st.success("历史记录已清空！")
+                st.rerun()
+        
+        with history_col1:
+            st.write(f"📊 共有 **{len(st.session_state.query_history)}** 条查询记录")
+        
+        # Show recent queries with enhanced styling
+        recent_queries = list(reversed(st.session_state.query_history[-5:]))
+        
+        for i, query_record in enumerate(recent_queries):
+            query_num = len(st.session_state.query_history) - i
+            question_preview = query_record['question'][:60] + "..." if len(query_record['question']) > 60 else query_record['question']
+            
+            # Enhanced query card
+            status_icon = "✅" if not query_record.get('error', False) else "❌"
+            with st.expander(
+                f"{status_icon} 问题 {query_num}: {question_preview}",
+                expanded=i == 0  # Expand first (most recent) query
+            ):
+                # Query details with safe formatting
+                st.markdown("""
+                <div style="background: white; padding: 1rem; border-radius: 8px; border-left: 4px solid #667eea;">
+                    <strong>💬 问题:</strong>
+                </div>
+                """, unsafe_allow_html=True)
+                st.write(query_record['question'])
                 
-                if query_record.get('context_filter'):
-                    st.write(f"**Filters:** {query_record['context_filter']}")
+                st.markdown("<br>", unsafe_allow_html=True)
                 
-                st.write(f"**Asked:** {query_record['timestamp']}")
+                answer_preview = query_record['answer'][:400] + "..." if len(query_record['answer']) > 400 else query_record['answer']
+                answer_color = "#28a745" if not query_record.get('error', False) else "#dc3545"
+                st.markdown(f"""
+                <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; border-left: 4px solid {answer_color};">
+                    <strong>🤖 回答:</strong>
+                </div>
+                """, unsafe_allow_html=True)
+                st.write(answer_preview)
                 
-                # Re-ask button
-                if st.button(f"Re-ask Question", key=f"reask_{i}"):
-                    st.session_state.temp_question = query_record['question']
-                    st.rerun()
+                # Query metadata
+                meta_col1, meta_col2, meta_col3 = st.columns(3)
+                
+                with meta_col1:
+                    if query_record.get('context_filter'):
+                        st.caption(f"🔍 筛选器: {query_record['context_filter']}")
+                
+                with meta_col2:
+                    sources_count = query_record.get('sources_count', 0)
+                    st.caption(f"📁 数据源: {sources_count} 个")
+                
+                with meta_col3:
+                    st.caption(f"⏰ 时间: {query_record['timestamp']}")
+                
+                # Action buttons
+                btn_col1, btn_col2 = st.columns(2)
+                
+                with btn_col1:
+                    if st.button(f"🔄 再次提问", key=f"reask_{i}", use_container_width=True):
+                        st.session_state.temp_question = query_record['question']
+                        st.rerun()
+                
+                with btn_col2:
+                    if st.button(f"📎 复制问题", key=f"copy_{i}", use_container_width=True):
+                        st.code(query_record['question'], language=None)
+    else:
+        st.markdown("""
+        <div style="text-align: center; padding: 2rem; background: #e9ecef; border-radius: 8px; border: 2px dashed #ced4da;">
+            <h4 style="color: #6c757d;">📝 还没有查询历史</h4>
+            <p style="color: #6c757d;">您的提问和回答将会显示在这里</p>
+        </div>
+        """, unsafe_allow_html=True)
 
 def show_example_questions():
     """
-    Show example questions users can ask
+    Show enhanced example questions with categories
     """
-    st.subheader("💡 Example Questions")
+    st.markdown("""
+    <div style="background: #f8f9fa; padding: 2rem; border-radius: 12px; margin: 2rem 0;">
+        <h3 style="margin: 0 0 1rem 0; color: #495057;">💡 示例问题指引</h3>
+        <p style="margin: 0; color: #6c757d;">以下是一些常见问题示例，点击即可直接使用</p>
+    </div>
+    """, unsafe_allow_html=True)
     
+    # Enhanced example questions with better categorization  
     example_categories = {
-        "📊 Financial Performance": [
-            "What was the company's total revenue last year?",
-            "How did profit margins change compared to previous year?",
-            "What are the main sources of revenue?",
-            "What were the total operating expenses?"
-        ],
-        "📈 Business Analysis": [
-            "What are the key business risks mentioned?",
-            "What growth strategies does the company discuss?",
-            "What market trends are affecting the business?",
-            "What are the main competitive advantages?"
-        ],
-        "💰 Financial Position": [
-            "What is the company's total debt?",
-            "How much cash does the company have?",
-            "What are the major assets?",
-            "What is the debt-to-equity ratio?"
-        ],
-        "🔮 Future Outlook": [
-            "What are the company's future plans?",
-            "What investments is the company making?",
-            "What are the expected challenges ahead?",
-            "What guidance did management provide?"
-        ]
+        "💰 财务数据分析": {
+            "icon": "💰",
+            "color": "#e8f5e8",
+            "questions": [
+                "公司在最新财年的总收入是多少？",
+                "净利润的同比增长率是多少？",
+                "主要的收入来源有哪些？",
+                "What were the total operating expenses?",
+                "运营成本的变化趋势如何？"
+            ]
+        },
+        "🏢 公司运营表现": {
+            "icon": "🏢",
+            "color": "#e3f2fd",
+            "questions": [
+                "公司的主要业务和竞争优势是什么？",
+                "What growth strategies does the company discuss?",
+                "市场趋势对业务的影响如何？",
+                "公司在行业中的地位和竞争力如何？",
+                "管理层对未来发展有什么规划？"
+            ]
+        },
+        "⚠️ 风险与合规": {
+            "icon": "⚠️",
+            "color": "#fff3cd",
+            "questions": [
+                "报告中提到的主要风险因素有哪些？",
+                "How does the company plan to mitigate these risks?",
+                "市场竞争和法律环境如何影响业务？",
+                "What regulatory changes might impact the business?",
+                "ESG相关的风险和机遇有哪些？"
+            ]
+        },
+        "🔮 未来展望": {
+            "icon": "🔮",
+            "color": "#f3e5f5",
+            "questions": [
+                "公司对未来的战略规划和投资计划是什么？",
+                "What investments is the company making?",
+                "预期的挑战和机遇有哪些？",
+                "What guidance did management provide?",
+                "未来增长的主要驱动力是什么？"
+            ]
+        }
     }
     
-    for category, questions in example_categories.items():
-        with st.expander(category):
-            for question in questions:
-                col1, col2 = st.columns([4, 1])
-                with col1:
-                    st.write(f"• {question}")
-                with col2:
-                    if st.button("Ask", key=f"example_{hash(question)}"):
-                        st.session_state.temp_question = question
-                        st.rerun()
+    # Display example questions in enhanced card format
+    for category_name, category_data in example_categories.items():
+        with st.expander(
+            f"{category_data['icon']} {category_name} ({len(category_data['questions'])} 个示例)",
+            expanded=False
+        ):
+            # Category description
+            st.markdown(f"""
+            <div style="background: {category_data['color']}; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+                <strong>{category_data['icon']} {category_name}相关问题</strong><br>
+                <small>点击下方任一问题即可直接提问</small>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Display questions as clickable buttons
+            for i, question in enumerate(category_data['questions']):
+                question_key = f"example_{category_name}_{i}"
+                if st.button(
+                    f"💬 {question}",
+                    key=question_key,
+                    use_container_width=True,
+                    help="点击直接使用这个示例问题"
+                ):
+                    # Set the example question for use in the interface
+                    st.session_state.temp_question = question
+                    st.rerun()
+            
+            st.markdown("<hr style='margin: 1rem 0; border: none; height: 1px; background: #dee2e6;'>", unsafe_allow_html=True)
     
-    # Handle example question selection
-    if hasattr(st.session_state, 'temp_question'):
-        st.info(f"Selected question: {st.session_state.temp_question}")
-        # You could auto-fill the question input here
-        del st.session_state.temp_question
+    # Example question selection handled in show_question_interface()
 
 def store_query_in_history(question, result, context_filter):
     """
