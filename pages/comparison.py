@@ -7,6 +7,7 @@ from utils.company_comparator import CompanyComparator
 from utils.data_visualizer import DataVisualizer
 from utils.state import init_state, init_processors
 from utils.industry_analytics import IndustryAnalytics
+from utils.export_ui import add_export_section
 import logging
 
 # Configure logging
@@ -62,6 +63,11 @@ def show_comparison_page():
     
     with tab6:
         show_industry_benchmarks()
+    
+    # Add export functionality
+    if hasattr(st.session_state, 'comparison_results') and st.session_state.comparison_results:
+        st.divider()
+        add_export_section('comparison', st.session_state.comparison_results)
 
 def show_comparison_setup():
     """

@@ -39,7 +39,30 @@ def show_insights_page():
             - ⚠️ **Risk Analysis**: Systematic assessment of financial risks and red flags  
             - 🤖 **AI Insights**: Automated generation of business intelligence
             - 📊 **Pattern Recognition**: Advanced trend and relationship analysis
+            - 📈 **Time-Series Forecasting**: ARIMA modeling and growth prediction
             """)
+            
+            # Show preview tabs even without data for better UX
+            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                "🔍 Anomaly Detection", "⚠️ Risk Analysis", 
+                "🤖 AI Insights", "📊 Pattern Analysis", "📈 Time-Series Forecasting"
+            ])
+            
+            with tab1:
+                st.info("**🔍 Anomaly Detection Preview**\n\nML-powered identification of unusual financial patterns using Isolation Forest algorithm.")
+            
+            with tab2:
+                st.info("**⚠️ Risk Analysis Preview**\n\nSystematic assessment of financial risks including liquidity crisis, excessive leverage, and operational inefficiency patterns.")
+            
+            with tab3:
+                st.info("**🤖 AI Insights Preview**\n\nAutomated generation of business intelligence combining performance, risk, anomaly, and comparative analysis.")
+            
+            with tab4:
+                st.info("**📊 Pattern Analysis Preview**\n\nAdvanced pattern recognition and trend analysis with forecasting signals.")
+            
+            with tab5:
+                st.info("**📈 Forecasting Preview**\n\nAdvanced time-series forecasting with ARIMA models, scenario analysis, and growth projections.")
+            
             return
         
         # Initialize insights engine

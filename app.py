@@ -22,7 +22,7 @@ def main():
     st.sidebar.title("Navigation")
     page = st.sidebar.selectbox(
         "Select a page:",
-        ["Home", "Upload & Process", "Data Analysis", "Q&A System", "Company Comparison", "Ratio Analysis", "AI Insights"]
+        ["Home", "Upload & Process", "Data Analysis", "Q&A System", "Company Comparison", "Ratio Analysis", "AI Insights", "Data Export"]
     )
     
     # Display selected page
@@ -47,6 +47,9 @@ def main():
     elif page == "AI Insights":
         from pages.insights import show_insights_page
         show_insights_page()
+    elif page == "Data Export":
+        from pages.export import show_export_page
+        show_export_page()
 
 def show_home_page():
     st.header("Welcome to the Annual Report Analysis System")
@@ -63,6 +66,7 @@ def show_home_page():
         - **Ratio Analysis**: Advanced financial ratio calculations
         - **AI Insights**: Pattern recognition and anomaly detection
         - **Company Comparison**: Side-by-side analysis with benchmarking
+        - **Data Export**: Professional reports in CSV, Excel, and PDF formats
         - **Visualization**: Interactive charts and graphs
         """)
     
@@ -75,6 +79,7 @@ def show_home_page():
         4. Analyze ratios in **Ratio Analysis** for detailed financial insights
         5. Compare companies in **Company Comparison** with industry benchmarks
         6. Explore **AI Insights** for automated pattern recognition and risk analysis
+        7. Export your analysis in **Data Export** as professional reports
         """)
     
     # System status
