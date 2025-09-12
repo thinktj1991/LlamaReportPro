@@ -84,15 +84,15 @@ def show_ratio_calculator():
     """
     Show financial ratio calculator for individual companies
     """
-    st.subheader("🧮 Financial Ratio Calculator")
+    st.subheader("🧮 财务比率计算器")
     
     # Company selection
     available_companies = list(st.session_state.company_data.keys())
     
     selected_company = st.selectbox(
-        "Select Company for Ratio Analysis:",
+        "选择进行比率分析的公司：",
         options=available_companies,
-        help="Choose a company to analyze financial ratios"
+        help="选择一家公司来分析财务比率"
     )
     
     if selected_company:

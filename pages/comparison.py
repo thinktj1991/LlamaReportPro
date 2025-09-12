@@ -73,7 +73,7 @@ def show_comparison_setup():
     """
     Setup comparison parameters
     """
-    st.subheader("⚙️ Comparison Setup")
+    st.subheader("⚙️ 对比设置")
     
     # Company selection
     available_companies = list(st.session_state.company_data.keys())
@@ -82,7 +82,7 @@ def show_comparison_setup():
     
     with col1:
         selected_companies = st.multiselect(
-            "Select Companies to Compare:",
+            "选择要对比的公司：",
             options=available_companies,
             default=available_companies[:min(3, len(available_companies))],
             help="Select 2 or more companies for comparison"
@@ -95,7 +95,7 @@ def show_comparison_setup():
         )
         
         selected_metrics = st.multiselect(
-            "Select Metrics to Compare:",
+            "选择要对比的指标：",
             options=available_metrics,
             default=available_metrics[:min(5, len(available_metrics))],
             help="Choose financial metrics for comparison"
@@ -113,7 +113,7 @@ def show_metric_coverage(available_metrics):
     """
     Show metric coverage across companies
     """
-    with st.expander("📊 Metric Coverage", expanded=False):
+    with st.expander("📊 指标覆盖范围", expanded=False):
         coverage = st.session_state.company_comparator.calculate_metric_coverage(
             st.session_state.company_data
         )

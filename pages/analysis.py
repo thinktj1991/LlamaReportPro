@@ -104,15 +104,15 @@ def show_table_analysis():
     
     with col1:
         selected_doc = st.selectbox(
-            "Select Document:",
-            ["All Documents"] + list(st.session_state.extracted_tables.keys())
+            "选择文档：",
+            ["所有文档"] + list(st.session_state.extracted_tables.keys())
         )
     
     with col2:
-        show_financial_only = st.checkbox("Financial Tables Only", value=False)
+        show_financial_only = st.checkbox("仅显示财务表格", value=False)
     
     with col3:
-        min_importance = st.slider("Minimum Importance Score", 0.0, 1.0, 0.3, 0.1)
+        min_importance = st.slider("最低重要性评分", 0.0, 1.0, 0.3, 0.1)
     
     # Filter and display tables
     filtered_tables = filter_tables(selected_doc, show_financial_only, min_importance)
@@ -204,7 +204,7 @@ def show_content_explorer():
     
     # Document selector
     selected_doc = st.selectbox(
-        "Select Document to Explore:",
+        "选择要探索的文档：",
         list(st.session_state.processed_documents.keys())
     )
     
@@ -424,7 +424,7 @@ def filter_tables(selected_doc, show_financial_only, min_importance):
     filtered_tables = []
     
     # Get tables from selected document or all documents
-    if selected_doc == "All Documents":
+    if selected_doc == "所有文档":
         all_tables = [table for tables in st.session_state.extracted_tables.values() for table in tables]
     else:
         all_tables = st.session_state.extracted_tables.get(selected_doc, [])
