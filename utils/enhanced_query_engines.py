@@ -1,664 +1,715 @@
+from .safe_config import should_disable_sub_question_engine
 """
 Enhanced Query Engines using LlamaIndex's advanced querying capabilities
+第二阶段增强：路由引擎、子问题引擎、合成策略、评估系统
 """
 
-from typing import Dict, Any, List, Optional
-from llama_index.core import VectorStoreIndex, Document
+from typing import Dict, Any, List, Optional, Union
+from datetime import datetime
+from enum import Enum
+import asyncio
+
+from llama_index.core import VectorStoreIndex, Document, Settings
 from llama_index.core.query_engine import (
-    RouterQueryEngine, 
+    RouterQueryEngine,
     SubQuestionQueryEngine,
     MultiStepQueryEngine,
     RetrieverQueryEngine
 )
 from llama_index.core.retrievers import VectorIndexRetriever
-# Note: Some retrievers may not be available in current version
-try:
-    from llama_index.core.retrievers import AutoMergingRetriever
-except ImportError:
-    AutoMergingRetriever = None
-
-try:
-    from llama_index.core.retrievers import KeywordTableRetriever  
-except ImportError:
-    KeywordTableRetriever = None
 from llama_index.core.tools import QueryEngineTool
-from llama_index.core.selectors import LLMSingleSelector
+from llama_index.core.selectors import LLMSingleSelector, PydanticSingleSelector
 from llama_index.core.postprocessor import SimilarityPostprocessor, KeywordNodePostprocessor
-from llama_index.core.response_synthesizers import get_response_synthesizer
-from llama_index.core.query_engine.knowledge_graph_query_engine import KnowledgeGraphQueryEngine
+from llama_index.core.response_synthesizers import get_response_synthesizer, ResponseMode
+from llama_index.core.llms import ChatMessage
+from llama_index.core.schema import QueryBundle
+
+# 评估相关导入
+try:
+    from llama_index.core.evaluation import (
+        FaithfulnessEvaluator,
+        RelevancyEvaluator,
+        CorrectnessEvaluator,
+        SemanticSimilarityEvaluator
+    )
+    EVALUATION_AVAILABLE = True
+except ImportError:
+    EVALUATION_AVAILABLE = False
+
+# 结构化输出相关
+from pydantic import BaseModel, Field
 import logging
 
 logger = logging.getLogger(__name__)
 
+# ==================== 第二阶段增强模型定义 ====================
+
+class QueryType(str, Enum):
+    """查询类型枚举"""
+    FINANCIAL_DATA = "financial_data"
+    TREND_ANALYSIS = "trend_analysis"
+    COMPARISON = "comparison"
+    SUMMARY = "summary"
+    DETAILED_SEARCH = "detailed_search"
+    CROSS_SECTION = "cross_section"
+
+class SynthesisStrategy(str, Enum):
+    """合成策略枚举"""
+    COMPACT = "compact"
+    REFINE = "refine"
+    TREE_SUMMARIZE = "tree_summarize"
+    SIMPLE_SUMMARIZE = "simple_summarize"
+
+class EvaluationMetrics(BaseModel):
+    """评估指标"""
+    faithfulness: Optional[float] = Field(description="忠实性评分", default=None)
+    relevancy: Optional[float] = Field(description="相关性评分", default=None)
+    correctness: Optional[float] = Field(description="正确性评分", default=None)
+    semantic_similarity: Optional[float] = Field(description="语义相似性评分", default=None)
+    response_time: Optional[float] = Field(description="响应时间(秒)", default=None)
+    token_usage: Optional[int] = Field(description="Token使用量", default=None)
+
+class EnhancedQueryResult(BaseModel):
+    """增强查询结果"""
+    query: str = Field(description="原始查询")
+    query_type: QueryType = Field(description="查询类型")
+    synthesis_strategy: SynthesisStrategy = Field(description="使用的合成策略")
+    answer: str = Field(description="答案")
+    sub_questions: List[str] = Field(description="子问题列表", default_factory=list)
+    sub_answers: List[str] = Field(description="子问题答案", default_factory=list)
+    sources: List[Dict[str, Any]] = Field(description="来源信息", default_factory=list)
+    evaluation_metrics: Optional[EvaluationMetrics] = Field(description="评估指标", default=None)
+    processing_time: float = Field(description="处理时间", default=0.0)
+    timestamp: datetime = Field(description="时间戳", default_factory=datetime.now)
+
 class EnhancedQueryEngineManager:
     """
-    Manage multiple advanced query engines for different types of financial queries
+    第二阶段增强：管理多种高级查询引擎，支持路由、子问题、评估
     """
-    
-    def __init__(self, index: VectorStoreIndex, llm=None):
+
+    def __init__(self, index: VectorStoreIndex, llm=None, enable_evaluation=True):
         self.index = index
-        self.llm = llm
+        self.llm = llm or Settings.llm
+        self.enable_evaluation = enable_evaluation and EVALUATION_AVAILABLE
+
+        # 查询引擎存储
         self.query_engines = {}
         self.router_query_engine = None
+        self.sub_question_engine = None
+
+        # 评估器
+        self.evaluators = {}
+
+        # 构建所有引擎
         self._build_specialized_engines()
-    
+        self._build_router_engine()
+        self._build_sub_question_engine()
+        if self.enable_evaluation:
+            self._build_evaluators()
+
     def _build_specialized_engines(self):
-        """Build specialized query engines for different query types"""
+        """构建专门的查询引擎，支持不同的合成策略"""
         try:
-            # 1. Financial Data Query Engine - for precise numerical queries
+            # 1. 财务数据查询引擎 - 精确数值查询，使用compact策略
             financial_retriever = VectorIndexRetriever(
                 index=self.index,
-                similarity_top_k=10,
-                vector_store_query_mode="default"
+                similarity_top_k=10
             )
-            
-            financial_postprocessor = KeywordNodePostprocessor(
-                required_keywords=["财务", "金额", "收入", "利润", "资产", "负债", "现金流", "financial", "revenue", "profit", "assets", "liabilities"],
-                exclude_keywords=["注释", "说明", "附录", "notes", "appendix"]
-            )
-            
-            self.query_engines["financial_data"] = RetrieverQueryEngine.from_args(
+            self.query_engines['financial_data'] = RetrieverQueryEngine.from_args(
                 retriever=financial_retriever,
-                node_postprocessors=[financial_postprocessor],
                 response_synthesizer=get_response_synthesizer(
-                    response_mode="tree_summarize",
+                    response_mode=ResponseMode.COMPACT,
                     use_async=True
-                )
+                ),
+                node_postprocessors=[
+                    SimilarityPostprocessor(similarity_cutoff=0.7),
+                    KeywordNodePostprocessor(keywords=["营收", "利润", "资产", "负债", "现金流"])
+                ]
             )
-            
-            # 2. Company Comparison Query Engine - for comparative analysis
-            comparison_retriever = VectorIndexRetriever(
-                index=self.index,
-                similarity_top_k=15,
-                vector_store_query_mode="default"
-            )
-            
-            self.query_engines["company_comparison"] = RetrieverQueryEngine.from_args(
-                retriever=comparison_retriever,
-                response_synthesizer=get_response_synthesizer(
-                    response_mode="compact",
-                    use_async=True
-                )
-            )
-            
-            # 3. Trend Analysis Query Engine - for historical and trend questions
+
+            # 2. 趋势分析引擎 - 时间序列分析，使用tree_summarize策略
             trend_retriever = VectorIndexRetriever(
                 index=self.index,
-                similarity_top_k=12,
-                vector_store_query_mode="default"
+                similarity_top_k=15
             )
-            
-            trend_postprocessor = KeywordNodePostprocessor(
-                required_keywords=["年", "季度", "增长", "变化", "趋势", "year", "quarter", "growth", "change", "trend"],
-                exclude_keywords=[]
-            )
-            
-            self.query_engines["trend_analysis"] = RetrieverQueryEngine.from_args(
+            self.query_engines['trend_analysis'] = RetrieverQueryEngine.from_args(
                 retriever=trend_retriever,
-                node_postprocessors=[trend_postprocessor],
                 response_synthesizer=get_response_synthesizer(
-                    response_mode="tree_summarize",
+                    response_mode=ResponseMode.TREE_SUMMARIZE,
                     use_async=True
-                )
+                ),
+                node_postprocessors=[
+                    KeywordNodePostprocessor(keywords=["增长", "下降", "趋势", "变化", "同比", "环比"])
+                ]
             )
-            
-            # 4. Risk Assessment Query Engine - for risk and compliance queries
-            risk_retriever = VectorIndexRetriever(
+
+            # 3. 对比分析引擎 - 多维度对比，使用refine策略
+            comparison_retriever = VectorIndexRetriever(
                 index=self.index,
-                similarity_top_k=8,
-                vector_store_query_mode="default"
+                similarity_top_k=20
             )
-            
-            risk_postprocessor = KeywordNodePostprocessor(
-                required_keywords=["风险", "合规", "监管", "审计", "risk", "compliance", "regulatory", "audit"],
-                exclude_keywords=[]
-            )
-            
-            self.query_engines["risk_assessment"] = RetrieverQueryEngine.from_args(
-                retriever=risk_retriever,
-                node_postprocessors=[risk_postprocessor],
+            self.query_engines['comparison'] = RetrieverQueryEngine.from_args(
+                retriever=comparison_retriever,
                 response_synthesizer=get_response_synthesizer(
-                    response_mode="compact",
+                    response_mode=ResponseMode.REFINE,
                     use_async=True
-                )
+                ),
+                node_postprocessors=[
+                    KeywordNodePostprocessor(keywords=["对比", "比较", "差异", "相似", "优于", "低于"])
+                ]
             )
-            
-            # 5. General Context Query Engine - for general questions
-            general_retriever = VectorIndexRetriever(
+
+            # 4. 摘要引擎 - 高层次概述，使用simple_summarize策略
+            summary_retriever = VectorIndexRetriever(
                 index=self.index,
-                similarity_top_k=6,
-                vector_store_query_mode="default"
+                similarity_top_k=25
             )
-            
-            similarity_postprocessor = SimilarityPostprocessor(similarity_cutoff=0.7)
-            
-            self.query_engines["general"] = RetrieverQueryEngine.from_args(
-                retriever=general_retriever,
-                node_postprocessors=[similarity_postprocessor],
+            self.query_engines['summary'] = RetrieverQueryEngine.from_args(
+                retriever=summary_retriever,
                 response_synthesizer=get_response_synthesizer(
-                    response_mode="refine",
+                    response_mode=ResponseMode.SIMPLE_SUMMARIZE,
                     use_async=True
                 )
             )
-            
-            logger.info("Successfully built specialized query engines")
-            
+
+            # 5. 详细搜索引擎 - 深度检索，使用compact策略
+            detailed_retriever = VectorIndexRetriever(
+                index=self.index,
+                similarity_top_k=30
+            )
+            self.query_engines['detailed_search'] = RetrieverQueryEngine.from_args(
+                retriever=detailed_retriever,
+                response_synthesizer=get_response_synthesizer(
+                    response_mode=ResponseMode.COMPACT,
+                    use_async=True
+                ),
+                node_postprocessors=[
+                    SimilarityPostprocessor(similarity_cutoff=0.6)
+                ]
+            )
+
+            logger.info("✅ 成功构建5个专门查询引擎")
+
         except Exception as e:
-            logger.error(f"Error building specialized query engines: {str(e)}")
-    
-    def build_router_query_engine(self) -> RouterQueryEngine:
-        """Build router query engine to automatically select the best engine"""
+            logger.error(f"❌ 构建专门查询引擎失败: {e}")
+            # 降级：构建基础引擎
+            basic_retriever = VectorIndexRetriever(index=self.index, similarity_top_k=10)
+            self.query_engines['basic'] = RetrieverQueryEngine.from_args(
+                retriever=basic_retriever,
+                response_synthesizer=get_response_synthesizer(response_mode=ResponseMode.COMPACT)
+            )
+    def _build_router_engine(self):
+        """构建路由查询引擎"""
         try:
-            # Create query engine tools
-            query_engine_tools = []
-            
-            # Financial Data Tool
-            financial_tool = QueryEngineTool.from_defaults(
-                query_engine=self.query_engines["financial_data"],
-                name="financial_data_engine",
-                description="""
-                Use this engine for queries about specific financial metrics, numbers, and data.
-                Examples:
-                - What is the company's revenue?
-                - Show me the profit margins
-                - What are the total assets?
-                - Financial ratio calculations
-                - Specific numerical data from financial statements
-                """
-            )
-            query_engine_tools.append(financial_tool)
-            
-            # Company Comparison Tool
-            comparison_tool = QueryEngineTool.from_defaults(
-                query_engine=self.query_engines["company_comparison"],
-                name="company_comparison_engine", 
-                description="""
-                Use this engine for comparative analysis between companies or time periods.
-                Examples:
-                - Compare company A vs company B
-                - How does performance compare to industry peers?
-                - Benchmarking and competitive analysis
-                - Relative performance metrics
-                """
-            )
-            query_engine_tools.append(comparison_tool)
-            
-            # Trend Analysis Tool
-            trend_tool = QueryEngineTool.from_defaults(
-                query_engine=self.query_engines["trend_analysis"],
-                name="trend_analysis_engine",
-                description="""
-                Use this engine for trend analysis, historical patterns, and temporal questions.
-                Examples:
-                - How has revenue grown over time?
-                - What are the quarterly trends?
-                - Year-over-year changes
-                - Growth patterns and forecasting insights
-                """
-            )
-            query_engine_tools.append(trend_tool)
-            
-            # Risk Assessment Tool
-            risk_tool = QueryEngineTool.from_defaults(
-                query_engine=self.query_engines["risk_assessment"],
-                name="risk_assessment_engine",
-                description="""
-                Use this engine for risk-related queries, compliance, and regulatory matters.
-                Examples:
-                - What are the main risk factors?
-                - Compliance and regulatory issues
-                - Audit findings and concerns
-                - Risk management strategies
-                """
-            )
-            query_engine_tools.append(risk_tool)
-            
-            # General Tool
-            general_tool = QueryEngineTool.from_defaults(
-                query_engine=self.query_engines["general"],
-                name="general_context_engine",
-                description="""
-                Use this engine for general questions about the company or documents.
-                Examples:
-                - General company information
-                - Business description and operations
-                - Management discussion
-                - Other general inquiries
-                """
-            )
-            query_engine_tools.append(general_tool)
-            
-            # Create router with LLM selector
-            self.router_query_engine = RouterQueryEngine(
-                selector=LLMSingleSelector.from_defaults(llm=self.llm),
-                query_engine_tools=query_engine_tools,
-                verbose=True
-            )
-            
-            logger.info("Successfully built router query engine")
-            return self.router_query_engine
-            
-        except Exception as e:
-            logger.error(f"Error building router query engine: {str(e)}")
-            return None
-    
-    def build_sub_question_engine(self) -> SubQuestionQueryEngine:
-        """Build sub-question query engine for complex multi-part queries"""
-        try:
-            # Create tools for sub-question decomposition
-            query_engine_tools = []
-            
-            for name, engine in self.query_engines.items():
-                tool = QueryEngineTool.from_defaults(
-                    query_engine=engine,
-                    name=f"{name}_tool",
-                    description=f"Query engine for {name.replace('_', ' ')} related questions"
+            # 创建查询引擎工具
+            tools = []
+
+            # 财务数据工具
+            if 'financial_data' in self.query_engines:
+                financial_tool = QueryEngineTool.from_defaults(
+                    query_engine=self.query_engines['financial_data'],
+                    description="用于精确的财务数据查询，如营收、利润、资产负债等具体数值。适合回答'公司营收是多少'、'净利润增长率'等问题。"
                 )
-                query_engine_tools.append(tool)
-            
-            sub_question_engine = SubQuestionQueryEngine.from_defaults(
-                query_engine_tools=query_engine_tools,
-                use_async=True,
-                verbose=True
-            )
-            
-            logger.info("Successfully built sub-question query engine")
-            return sub_question_engine
-            
+                tools.append(financial_tool)
+
+            # 趋势分析工具
+            if 'trend_analysis' in self.query_engines:
+                trend_tool = QueryEngineTool.from_defaults(
+                    query_engine=self.query_engines['trend_analysis'],
+                    description="用于趋势分析和时间序列分析，识别增长模式、周期性变化等。适合回答'增长趋势如何'、'业绩变化'等问题。"
+                )
+                tools.append(trend_tool)
+
+            # 对比分析工具
+            if 'comparison' in self.query_engines:
+                comparison_tool = QueryEngineTool.from_defaults(
+                    query_engine=self.query_engines['comparison'],
+                    description="用于多维度对比分析，比较不同时期、不同指标或不同方面。适合回答'与去年相比'、'优势劣势对比'等问题。"
+                )
+                tools.append(comparison_tool)
+
+            # 摘要工具
+            if 'summary' in self.query_engines:
+                summary_tool = QueryEngineTool.from_defaults(
+                    query_engine=self.query_engines['summary'],
+                    description="用于生成高层次摘要和概述，提供整体情况。适合回答'公司整体情况'、'业务概况'等问题。"
+                )
+                tools.append(summary_tool)
+
+            # 详细搜索工具
+            if 'detailed_search' in self.query_engines:
+                detailed_tool = QueryEngineTool.from_defaults(
+                    query_engine=self.query_engines['detailed_search'],
+                    description="用于深度详细搜索，获取全面信息。适合回答复杂的、需要详细信息的问题。"
+                )
+                tools.append(detailed_tool)
+
+            # 构建路由器
+            if tools:
+                self.router_query_engine = RouterQueryEngine(
+                    selector=PydanticSingleSelector.from_defaults(llm=self.llm),
+                    query_engine_tools=tools,
+                    verbose=True
+                )
+                logger.info(f"✅ 成功构建路由查询引擎，包含{len(tools)}个工具")
+            else:
+                logger.warning("⚠️ 无可用工具，跳过路由引擎构建")
+
         except Exception as e:
-            logger.error(f"Error building sub-question query engine: {str(e)}")
-            return None
-    
-    def get_query_engine(self, engine_type: str = "router") -> Optional[Any]:
-        """Get a specific query engine"""
-        if engine_type == "router":
-            if not self.router_query_engine:
-                return self.build_router_query_engine()
-            return self.router_query_engine
-        elif engine_type == "sub_question":
-            return self.build_sub_question_engine()
-        elif engine_type in self.query_engines:
-            return self.query_engines[engine_type]
-        else:
-            logger.warning(f"Unknown engine type: {engine_type}")
-            return None
-    
-    def query(self, question: str, engine_type: str = "router", context_filter: Optional[Dict] = None) -> Dict[str, Any]:
-        """Query using the specified engine type"""
+            logger.error(f"❌ 构建路由查询引擎失败: {e}")
+            self.router_query_engine = None
+
+    def _build_sub_question_engine(self):
+        """构建子问题查询引擎"""
+        if should_disable_sub_question_engine():
+            logger.info("⚠️ 子问题查询引擎已禁用（安全模式）")
+            self.sub_question_engine = None
+            return
+        """构建子问题查询引擎"""
         try:
-            query_engine = self.get_query_engine(engine_type)
-            if not query_engine:
-                return {
-                    'answer': f"Query engine '{engine_type}' not available",
-                    'error': True,
-                    'engine_type': engine_type
-                }
-            
-            # Enhance query with context filter
-            enhanced_query = self._enhance_query_with_context(question, context_filter)
-            
-            # Execute query
-            response = query_engine.query(enhanced_query)
-            
-            # Extract metadata and sources
-            sources = self._extract_response_sources(response)
-            
-            result = {
-                'answer': str(response),
-                'sources': sources,
-                'error': False,
-                'engine_type': engine_type,
-                'original_question': question,
-                'enhanced_query': enhanced_query,
-                'metadata': self._extract_response_metadata(response)
-            }
-            
-            logger.info(f"Successfully processed query with {engine_type} engine")
+            # 首先检查question_gen是否可用
+            try:
+                from llama_index.question_gen.openai import OpenAIQuestionGenerator
+                question_gen_available = True
+            except ImportError:
+                question_gen_available = False
+                logger.error("❌ 构建子问题查询引擎失败: `llama-index-question-gen-openai` package cannot be found. Please install it by using `pip install `llama-index-question-gen-openai`")
+                self.sub_question_engine = None
+                return
+
+            # 使用最佳的查询引擎作为基础
+            base_engine = (
+                self.query_engines.get('detailed_search') or
+                self.query_engines.get('financial_data') or
+                list(self.query_engines.values())[0] if self.query_engines else None
+            )
+
+            if base_engine and question_gen_available:
+                # 创建question generator
+                question_gen = OpenAIQuestionGenerator.from_defaults(llm=self.llm)
+
+                self.sub_question_engine = SubQuestionQueryEngine.from_defaults(
+                    query_engine_tools=[
+                        QueryEngineTool.from_defaults(
+                            query_engine=base_engine,
+                            description="用于回答财务年报相关的各种问题"
+                        )
+                    ],
+                    question_gen=question_gen,
+                    llm=self.llm,
+                    verbose=True
+                )
+                logger.info("✅ 成功构建子问题查询引擎")
+            else:
+                if not base_engine:
+                    logger.warning("⚠️ 无基础查询引擎，跳过子问题引擎构建")
+                self.sub_question_engine = None
+
+        except Exception as e:
+            logger.error(f"❌ 构建子问题查询引擎失败: {e}")
+            self.sub_question_engine = None
+
+    def _build_evaluators(self):
+        """构建评估器"""
+        if not EVALUATION_AVAILABLE:
+            logger.warning("⚠️ 评估模块不可用，跳过评估器构建")
+            return
+
+        try:
+            # 忠实性评估器
+            self.evaluators['faithfulness'] = FaithfulnessEvaluator(llm=self.llm)
+
+            # 相关性评估器
+            self.evaluators['relevancy'] = RelevancyEvaluator(llm=self.llm)
+
+            # 正确性评估器（需要参考答案）
+            self.evaluators['correctness'] = CorrectnessEvaluator(llm=self.llm)
+
+            # 语义相似性评估器
+            self.evaluators['semantic_similarity'] = SemanticSimilarityEvaluator()
+
+            logger.info("✅ 成功构建评估器")
+
+        except Exception as e:
+            logger.error(f"❌ 构建评估器失败: {e}")
+            self.evaluators = {}
+
+    def _infer_query_type(self, query: str) -> QueryType:
+        """推断查询类型"""
+        query_lower = query.lower()
+
+        # 财务数据关键词
+        financial_keywords = ['营收', '收入', '利润', '资产', '负债', '现金流', '毛利率', '净利率',
+                             'roe', 'roa', '财务指标', '数据', '金额', '元']
+
+        # 趋势分析关键词
+        trend_keywords = ['增长', '下降', '趋势', '变化', '同比', '环比', '发展', '走势', '波动']
+
+        # 对比分析关键词
+        comparison_keywords = ['对比', '比较', '差异', '相似', '优于', '低于', '超过', '不如', '与']
+
+        # 摘要关键词
+        summary_keywords = ['概况', '总体', '整体', '概述', '简介', '情况', '状况', '总结']
+
+        # 跨章节关键词
+        cross_section_keywords = ['各', '分别', '不同', '多个', '全面', '综合', '各项', '整个']
+
+        # 计算匹配度
+        financial_score = sum(1 for keyword in financial_keywords if keyword in query_lower)
+        trend_score = sum(1 for keyword in trend_keywords if keyword in query_lower)
+        comparison_score = sum(1 for keyword in comparison_keywords if keyword in query_lower)
+        summary_score = sum(1 for keyword in summary_keywords if keyword in query_lower)
+        cross_section_score = sum(1 for keyword in cross_section_keywords if keyword in query_lower)
+
+        # 返回得分最高的类型
+        scores = {
+            QueryType.FINANCIAL_DATA: financial_score,
+            QueryType.TREND_ANALYSIS: trend_score,
+            QueryType.COMPARISON: comparison_score,
+            QueryType.SUMMARY: summary_score,
+            QueryType.CROSS_SECTION: cross_section_score
+        }
+
+        max_type = max(scores, key=scores.get)
+        return max_type if scores[max_type] > 0 else QueryType.DETAILED_SEARCH
+
+    def _get_synthesis_strategy(self, query_type: QueryType) -> SynthesisStrategy:
+        """根据查询类型获取最佳合成策略"""
+        strategy_mapping = {
+            QueryType.FINANCIAL_DATA: SynthesisStrategy.COMPACT,
+            QueryType.TREND_ANALYSIS: SynthesisStrategy.TREE_SUMMARIZE,
+            QueryType.COMPARISON: SynthesisStrategy.REFINE,
+            QueryType.SUMMARY: SynthesisStrategy.SIMPLE_SUMMARIZE,
+            QueryType.DETAILED_SEARCH: SynthesisStrategy.COMPACT,
+            QueryType.CROSS_SECTION: SynthesisStrategy.TREE_SUMMARIZE
+        }
+        return strategy_mapping.get(query_type, SynthesisStrategy.COMPACT)
+
+    async def _evaluate_response(self, query: str, response: str, contexts: List[str]) -> EvaluationMetrics:
+        """评估响应质量"""
+        if not self.enable_evaluation or not self.evaluators:
+            return EvaluationMetrics()
+
+        metrics = EvaluationMetrics()
+
+        try:
+            # 忠实性评估
+            if 'faithfulness' in self.evaluators and contexts:
+                faithfulness_result = await self.evaluators['faithfulness'].aevaluate(
+                    query=query,
+                    response=response,
+                    contexts=contexts
+                )
+                metrics.faithfulness = faithfulness_result.score
+
+            # 相关性评估
+            if 'relevancy' in self.evaluators:
+                relevancy_result = await self.evaluators['relevancy'].aevaluate(
+                    query=query,
+                    response=response,
+                    contexts=contexts
+                )
+                metrics.relevancy = relevancy_result.score
+
+        except Exception as e:
+            logger.warning(f"⚠️ 评估过程中出现错误: {e}")
+
+        return metrics
+
+    async def query_enhanced(self, query: str, use_router: bool = True, use_sub_questions: bool = False,
+                           enable_evaluation: bool = True) -> EnhancedQueryResult:
+        """
+        第二阶段增强查询方法
+
+        Args:
+            query: 查询问题
+            use_router: 是否使用路由引擎
+            use_sub_questions: 是否使用子问题分解
+            enable_evaluation: 是否启用评估
+
+        Returns:
+            EnhancedQueryResult: 增强查询结果
+        """
+        import time
+        start_time = time.time()
+
+        # 推断查询类型
+        query_type = self._infer_query_type(query)
+        synthesis_strategy = self._get_synthesis_strategy(query_type)
+
+        try:
+            # 选择查询引擎
+            if use_sub_questions and self.sub_question_engine:
+                # 使用子问题引擎
+                response = await self._query_with_sub_questions(query)
+                sub_questions = getattr(response, 'sub_questions', [])
+                sub_answers = getattr(response, 'sub_answers', [])
+            elif use_router and self.router_query_engine:
+                # 使用路由引擎
+                response = self.router_query_engine.query(query)
+                sub_questions = []
+                sub_answers = []
+            else:
+                # 使用专门引擎
+                engine_key = self._get_engine_key(query_type)
+                engine = self.query_engines.get(engine_key, list(self.query_engines.values())[0])
+                response = engine.query(query)
+                sub_questions = []
+                sub_answers = []
+
+            # 提取响应信息
+            answer = str(response)
+            sources = self._extract_sources(response)
+            contexts = [source.get('text', '') for source in sources]
+
+            # 评估响应质量
+            evaluation_metrics = None
+            if enable_evaluation and self.enable_evaluation:
+                evaluation_metrics = await self._evaluate_response(query, answer, contexts)
+
+            # 计算处理时间
+            processing_time = time.time() - start_time
+
+            # 构建结果
+            result = EnhancedQueryResult(
+                query=query,
+                query_type=query_type,
+                synthesis_strategy=synthesis_strategy,
+                answer=answer,
+                sub_questions=sub_questions,
+                sub_answers=sub_answers,
+                sources=sources,
+                evaluation_metrics=evaluation_metrics,
+                processing_time=processing_time
+            )
+
+            logger.info(f"✅ 增强查询完成: {query_type.value}, 耗时: {processing_time:.2f}s")
             return result
-            
+
         except Exception as e:
-            logger.error(f"Error in query processing: {str(e)}")
-            return {
-                'answer': f"Error processing query: {str(e)}",
-                'error': True,
-                'engine_type': engine_type,
-                'original_question': question
-            }
-    
-    def _enhance_query_with_context(self, question: str, context_filter: Optional[Dict]) -> str:
-        """Enhance query with contextual information"""
-        enhanced_parts = [question]
-        
-        if context_filter:
-            if 'company' in context_filter:
-                enhanced_parts.append(f"Focus on information about {context_filter['company']}")
-            
-            if 'year' in context_filter:
-                enhanced_parts.append(f"for the year {context_filter['year']}")
-            
-            if 'document_type' in context_filter:
-                enhanced_parts.append(f"from {context_filter['document_type']} documents")
-            
-            if 'financial_focus' in context_filter:
-                focus_areas = context_filter['financial_focus']
-                if isinstance(focus_areas, list):
-                    enhanced_parts.append(f"with focus on {', '.join(focus_areas)}")
-        
-        enhanced_parts.append("Please provide specific data and cite sources when possible.")
-        
-        return " ".join(enhanced_parts)
-    
-    def _extract_response_sources(self, response) -> List[Dict[str, Any]]:
-        """Extract source information from response"""
+            logger.error(f"❌ 增强查询失败: {e}")
+            # 降级到基础查询
+            return await self._fallback_query(query, start_time)
+
+    async def _query_with_sub_questions(self, query: str):
+        """使用子问题引擎查询"""
+        try:
+            response = self.sub_question_engine.query(query)
+            return response
+        except Exception as e:
+            logger.error(f"❌ 子问题查询失败: {e}")
+            # 降级到基础引擎
+            basic_engine = list(self.query_engines.values())[0] if self.query_engines else None
+            if basic_engine:
+                return basic_engine.query(query)
+            else:
+                raise e
+
+    def _get_engine_key(self, query_type: QueryType) -> str:
+        """根据查询类型获取引擎键"""
+        mapping = {
+            QueryType.FINANCIAL_DATA: 'financial_data',
+            QueryType.TREND_ANALYSIS: 'trend_analysis',
+            QueryType.COMPARISON: 'comparison',
+            QueryType.SUMMARY: 'summary',
+            QueryType.DETAILED_SEARCH: 'detailed_search',
+            QueryType.CROSS_SECTION: 'detailed_search'
+        }
+        return mapping.get(query_type, 'detailed_search')
+
+    def _extract_sources(self, response) -> List[Dict[str, Any]]:
+        """提取来源信息"""
         sources = []
         try:
             if hasattr(response, 'source_nodes') and response.source_nodes:
-                for node in response.source_nodes:
-                    source_info = {
-                        'text_snippet': node.text[:200] + "..." if len(node.text) > 200 else node.text,
+                for i, node in enumerate(response.source_nodes):
+                    source = {
+                        'id': i,
+                        'text': node.text[:300] + "..." if len(node.text) > 300 else node.text,
                         'score': getattr(node, 'score', 0.0),
-                        'metadata': node.metadata if hasattr(node, 'metadata') else {}
+                        'metadata': getattr(node, 'metadata', {})
                     }
-                    sources.append(source_info)
+                    sources.append(source)
         except Exception as e:
-            logger.error(f"Error extracting response sources: {str(e)}")
-        
-        return sources
-    
-    def _extract_response_metadata(self, response) -> Dict[str, Any]:
-        """Extract metadata from response"""
-        metadata = {}
-        try:
-            if hasattr(response, 'metadata') and response.metadata:
-                metadata = response.metadata
-            
-            # Add response statistics
-            metadata['response_length'] = len(str(response))
-            metadata['source_count'] = len(getattr(response, 'source_nodes', []))
-            
-        except Exception as e:
-            logger.error(f"Error extracting response metadata: {str(e)}")
-        
-        return metadata
+            logger.warning(f"⚠️ 提取来源信息失败: {e}")
 
+        return sources
+
+    async def _fallback_query(self, query: str, start_time: float) -> EnhancedQueryResult:
+        """降级查询"""
+        try:
+            # 使用第一个可用的引擎
+            engine = list(self.query_engines.values())[0] if self.query_engines else None
+            if engine:
+                response = engine.query(query)
+                answer = str(response)
+                sources = self._extract_sources(response)
+            else:
+                answer = "抱歉，查询引擎不可用。"
+                sources = []
+
+            processing_time = time.time() - start_time
+
+            return EnhancedQueryResult(
+                query=query,
+                query_type=QueryType.DETAILED_SEARCH,
+                synthesis_strategy=SynthesisStrategy.COMPACT,
+                answer=answer,
+                sources=sources,
+                processing_time=processing_time
+            )
+
+        except Exception as e:
+            logger.error(f"❌ 降级查询也失败: {e}")
+            processing_time = time.time() - start_time
+
+            return EnhancedQueryResult(
+                query=query,
+                query_type=QueryType.DETAILED_SEARCH,
+                synthesis_strategy=SynthesisStrategy.COMPACT,
+                answer=f"查询失败: {str(e)}",
+                sources=[],
+                processing_time=processing_time
+            )
+
+    def get_available_engines(self) -> Dict[str, str]:
+        """获取可用的查询引擎列表"""
+        engines = {}
+        if self.query_engines:
+            for key in self.query_engines.keys():
+                engines[key] = f"专门的{key}查询引擎"
+
+        if self.router_query_engine:
+            engines['router'] = "智能路由查询引擎"
+
+        if self.sub_question_engine:
+            engines['sub_question'] = "子问题分解查询引擎"
+
+        return engines
+
+    def get_engine_stats(self) -> Dict[str, Any]:
+        """获取引擎统计信息"""
+        return {
+            'specialized_engines': len(self.query_engines),
+            'router_available': self.router_query_engine is not None,
+            'sub_question_available': self.sub_question_engine is not None,
+            'evaluation_available': self.enable_evaluation,
+            'evaluators_count': len(self.evaluators)
+        }
+
+    async def batch_query(self, queries: List[str], use_router: bool = True) -> List[EnhancedQueryResult]:
+        """批量查询"""
+        results = []
+        for query in queries:
+            try:
+                result = await self.query_enhanced(query, use_router=use_router)
+                results.append(result)
+            except Exception as e:
+                logger.error(f"❌ 批量查询中的单个查询失败: {e}")
+                # 添加错误结果
+                error_result = EnhancedQueryResult(
+                    query=query,
+                    query_type=QueryType.DETAILED_SEARCH,
+                    synthesis_strategy=SynthesisStrategy.COMPACT,
+                    answer=f"查询失败: {str(e)}",
+                    sources=[],
+                    processing_time=0.0
+                )
+                results.append(error_result)
+
+        return results
+
+# ==================== 第二阶段增强工具函数 ====================
+
+class QueryEngineFactory:
+    """查询引擎工厂类"""
+
+    @staticmethod
+    def create_enhanced_manager(index: VectorStoreIndex, llm=None, enable_evaluation: bool = True) -> EnhancedQueryEngineManager:
+        """创建增强查询引擎管理器"""
+        return EnhancedQueryEngineManager(index=index, llm=llm, enable_evaluation=enable_evaluation)
+
+    @staticmethod
+    def create_router_only(index: VectorStoreIndex, llm=None) -> Optional[RouterQueryEngine]:
+        """仅创建路由引擎"""
+        try:
+            manager = EnhancedQueryEngineManager(index=index, llm=llm, enable_evaluation=False)
+            return manager.router_query_engine
+        except Exception as e:
+            logger.error(f"❌ 创建路由引擎失败: {e}")
+            return None
+
+    @staticmethod
+    def create_sub_question_only(index: VectorStoreIndex, llm=None) -> Optional[SubQuestionQueryEngine]:
+        """仅创建子问题引擎"""
+        try:
+            manager = EnhancedQueryEngineManager(index=index, llm=llm, enable_evaluation=False)
+            return manager.sub_question_engine
+        except Exception as e:
+            logger.error(f"❌ 创建子问题引擎失败: {e}")
+            return None
+
+def create_evaluation_suite(llm=None) -> Dict[str, Any]:
+    """创建评估套件"""
+    if not EVALUATION_AVAILABLE:
+        logger.warning("⚠️ 评估模块不可用")
+        return {}
+
+    try:
+        evaluators = {
+            'faithfulness': FaithfulnessEvaluator(llm=llm),
+            'relevancy': RelevancyEvaluator(llm=llm),
+            'correctness': CorrectnessEvaluator(llm=llm),
+            'semantic_similarity': SemanticSimilarityEvaluator()
+        }
+        logger.info("✅ 成功创建评估套件")
+        return evaluators
+    except Exception as e:
+        logger.error(f"❌ 创建评估套件失败: {e}")
+        return {}
+
+# ==================== 向后兼容性保持 ====================
 
 class HybridRetriever:
-    """
-    Hybrid retriever combining vector similarity and keyword matching
-    """
-    
-    def __init__(self, index: VectorStoreIndex, similarity_top_k: int = 10, keyword_top_k: int = 5):
-        self.index = index
-        self.similarity_top_k = similarity_top_k
-        self.keyword_top_k = keyword_top_k
-        self.vector_retriever = VectorIndexRetriever(
-            index=index,
-            similarity_top_k=similarity_top_k
-        )
-        # Note: KeywordTableRetriever may not be available in current version
-        self.keyword_retriever = None
-        if KeywordTableRetriever:
-            self._try_build_keyword_retriever()
-    
-    def _try_build_keyword_retriever(self):
-        """Try to build keyword retriever if available"""
-        try:
-            # This would require a keyword table index to be built
-            # For now, we'll use a simple implementation
-            pass
-        except Exception as e:
-            logger.warning(f"Could not build keyword retriever: {str(e)}")
-    
-    def retrieve(self, query_str: str) -> List[Any]:
-        """Retrieve using hybrid approach"""
-        try:
-            # Get vector similarity results
-            vector_results = self.vector_retriever.retrieve(query_str)
-            
-            # Get keyword results (if available)
-            keyword_results = []
-            if self.keyword_retriever:
-                keyword_results = self.keyword_retriever.retrieve(query_str)
-            
-            # Combine and deduplicate results
-            combined_results = self._combine_results(vector_results, keyword_results)
-            
-            return combined_results
-            
-        except Exception as e:
-            logger.error(f"Error in hybrid retrieval: {str(e)}")
-            return vector_results if 'vector_results' in locals() else []
-    
-    def _combine_results(self, vector_results: List, keyword_results: List) -> List:
-        """Combine and score results from different retrievers"""
-        try:
-            # Simple combination - prioritize vector results, add unique keyword results
-            seen_texts = set()
-            combined = []
-            
-            # Add vector results first (higher priority)
-            for result in vector_results:
-                text_key = result.text[:100]  # Use first 100 chars as key
-                if text_key not in seen_texts:
-                    combined.append(result)
-                    seen_texts.add(text_key)
-            
-            # Add unique keyword results
-            for result in keyword_results:
-                text_key = result.text[:100]
-                if text_key not in seen_texts and len(combined) < self.similarity_top_k + self.keyword_top_k:
-                    combined.append(result)
-                    seen_texts.add(text_key)
-            
-            return combined[:self.similarity_top_k + self.keyword_top_k]
-            
-        except Exception as e:
-            logger.error(f"Error combining retrieval results: {str(e)}")
-            return vector_results
+    """向后兼容的混合检索器类"""
 
+    def __init__(self, index: VectorStoreIndex):
+        self.index = index
+        logger.warning("⚠️ HybridRetriever已弃用，请使用EnhancedQueryEngineManager")
+
+    def retrieve(self, query: str) -> List[Any]:
+        """基础检索方法"""
+        try:
+            retriever = VectorIndexRetriever(index=self.index, similarity_top_k=10)
+            return retriever.retrieve(query)
+        except Exception as e:
+            logger.error(f"❌ HybridRetriever检索失败: {e}")
+            return []
+
+# ==================== 向后兼容的旧类保持 ====================
 
 class ContextualQueryProcessor:
-    """
-    Process queries with enhanced contextual understanding
-    """
-    
-    def __init__(self, query_engine_manager: EnhancedQueryEngineManager):
-        self.query_manager = query_engine_manager
-        self.query_history = []
-        self.context_memory = {}
-    
-    def process_query_with_context(self, question: str, conversation_id: str = "default") -> Dict[str, Any]:
-        """Process query with conversational context"""
+    """向后兼容的上下文查询处理器"""
+
+    def __init__(self, enhanced_manager: EnhancedQueryEngineManager):
+        self.enhanced_manager = enhanced_manager
+        logger.warning("⚠️ ContextualQueryProcessor已弃用，请直接使用EnhancedQueryEngineManager")
+
+    async def process_query(self, query: str) -> Dict[str, Any]:
+        """处理查询并返回结果"""
         try:
-            # Get conversation context
-            context = self._get_conversation_context(conversation_id)
-            
-            # Classify query type
-            query_type = self._classify_query_type(question)
-            
-            # Enhance query with context
-            enhanced_context = self._build_enhanced_context(question, context, query_type)
-            
-            # Select best engine for query type
-            engine_type = self._select_engine_for_query_type(query_type)
-            
-            # Execute query
-            result = self.query_manager.query(
-                question=question,
-                engine_type=engine_type,
-                context_filter=enhanced_context
-            )
-            
-            # Update conversation context
-            self._update_conversation_context(conversation_id, question, result)
-            
-            # Add query classification to result
-            result['query_type'] = query_type
-            result['conversation_id'] = conversation_id
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error in contextual query processing: {str(e)}")
+            result = await self.enhanced_manager.query_enhanced(query)
             return {
-                'answer': f"Error processing contextual query: {str(e)}",
-                'error': True,
-                'query_type': 'unknown'
+                'answer': result.answer,
+                'sources': result.sources,
+                'query_type': result.query_type.value,
+                'processing_time': result.processing_time
             }
-    
-    def _classify_query_type(self, question: str) -> str:
-        """Classify the type of query"""
-        question_lower = question.lower()
-        
-        # Financial data queries
-        if any(keyword in question_lower for keyword in ['收入', '利润', '资产', '负债', '现金流', 'revenue', 'profit', 'assets', 'cash flow']):
-            return 'financial_data'
-        
-        # Comparison queries
-        elif any(keyword in question_lower for keyword in ['比较', '对比', '相比', 'compare', 'versus', 'vs', 'against']):
-            return 'comparison'
-        
-        # Trend and temporal queries
-        elif any(keyword in question_lower for keyword in ['趋势', '增长', '变化', '历史', 'trend', 'growth', 'change', 'over time', 'historical']):
-            return 'trend_analysis'
-        
-        # Risk queries
-        elif any(keyword in question_lower for keyword in ['风险', '合规', 'risk', 'compliance', 'regulatory']):
-            return 'risk_assessment'
-        
-        # Complex multi-part queries
-        elif any(keyword in question_lower for keyword in ['以及', '同时', '还有', 'and also', 'additionally', 'furthermore']) or '?' in question and question.count('?') > 1:
-            return 'multi_part'
-        
-        else:
-            return 'general'
-    
-    def _select_engine_for_query_type(self, query_type: str) -> str:
-        """Select the best engine for the query type"""
-        engine_mapping = {
-            'financial_data': 'financial_data',
-            'comparison': 'company_comparison', 
-            'trend_analysis': 'trend_analysis',
-            'risk_assessment': 'risk_assessment',
-            'multi_part': 'sub_question',
-            'general': 'router'
-        }
-        
-        return engine_mapping.get(query_type, 'router')
-    
-    def _get_conversation_context(self, conversation_id: str) -> Dict[str, Any]:
-        """Get context for a conversation"""
-        return self.context_memory.get(conversation_id, {
-            'previous_queries': [],
-            'mentioned_companies': set(),
-            'mentioned_years': set(),
-            'focus_areas': set()
-        })
-    
-    def _build_enhanced_context(self, question: str, context: Dict[str, Any], query_type: str) -> Dict[str, Any]:
-        """Build enhanced context for the query"""
-        enhanced_context = {}
-        
-        # Add mentioned companies from context
-        if context.get('mentioned_companies'):
-            enhanced_context['company'] = list(context['mentioned_companies'])[0]  # Use first mentioned
-        
-        # Add mentioned years
-        if context.get('mentioned_years'):
-            enhanced_context['year'] = max(context['mentioned_years'])  # Use most recent
-        
-        # Add focus areas
-        if context.get('focus_areas'):
-            enhanced_context['financial_focus'] = list(context['focus_areas'])
-        
-        # Extract new context from current question
-        import re
-        
-        # Extract years
-        years = re.findall(r'\b(20\d{2})\b', question)
-        if years:
-            enhanced_context['year'] = years[-1]  # Use last mentioned year
-        
-        # Extract company mentions (basic pattern)
-        # This could be enhanced with NER
-        company_patterns = [r'([^。，\s]+(?:公司|Corporation|Inc\.|Ltd\.|Corp\.))', r'([A-Z][a-zA-Z\s&]+(?:Company|Corp|Inc|Ltd))']
-        for pattern in company_patterns:
-            companies = re.findall(pattern, question)
-            if companies:
-                enhanced_context['company'] = companies[0]
-                break
-        
-        return enhanced_context
-    
-    def _update_conversation_context(self, conversation_id: str, question: str, result: Dict[str, Any]):
-        """Update conversation context with new information"""
-        try:
-            if conversation_id not in self.context_memory:
-                self.context_memory[conversation_id] = {
-                    'previous_queries': [],
-                    'mentioned_companies': set(),
-                    'mentioned_years': set(),
-                    'focus_areas': set()
-                }
-            
-            context = self.context_memory[conversation_id]
-            
-            # Add to query history
-            context['previous_queries'].append({
-                'question': question,
-                'query_type': result.get('query_type', 'unknown'),
-                'timestamp': self._get_current_timestamp()
-            })
-            
-            # Extract and store context elements
-            import re
-            
-            # Extract companies
-            company_patterns = [r'([^。，\s]+(?:公司|Corporation|Inc\.|Ltd\.|Corp\.))', r'([A-Z][a-zA-Z\s&]+(?:Company|Corp|Inc|Ltd))']
-            for pattern in company_patterns:
-                companies = re.findall(pattern, question)
-                context['mentioned_companies'].update(companies)
-            
-            # Extract years
-            years = re.findall(r'\b(20\d{2})\b', question)
-            context['mentioned_years'].update(years)
-            
-            # Extract focus areas from query type
-            focus_mapping = {
-                'financial_data': 'financial_metrics',
-                'comparison': 'comparative_analysis',
-                'trend_analysis': 'trend_analysis',
-                'risk_assessment': 'risk_factors'
-            }
-            
-            query_type = result.get('query_type', 'unknown')
-            if query_type in focus_mapping:
-                context['focus_areas'].add(focus_mapping[query_type])
-            
-            # Limit context size
-            if len(context['previous_queries']) > 10:
-                context['previous_queries'] = context['previous_queries'][-10:]
-            
-            # Convert sets to lists for JSON serialization if needed
-            # Keep as sets for now for efficient operations
-            
         except Exception as e:
-            logger.error(f"Error updating conversation context: {str(e)}")
-    
-    def _get_current_timestamp(self) -> float:
-        """Get current timestamp"""
-        import time
-        return time.time()
-    
-    def get_conversation_summary(self, conversation_id: str) -> Dict[str, Any]:
-        """Get a summary of the conversation context"""
-        context = self._get_conversation_context(conversation_id)
-        
-        return {
-            'conversation_id': conversation_id,
-            'total_queries': len(context['previous_queries']),
-            'mentioned_companies': list(context['mentioned_companies']),
-            'mentioned_years': sorted(list(context['mentioned_years'])),
-            'focus_areas': list(context['focus_areas']),
-            'recent_queries': context['previous_queries'][-5:]  # Last 5 queries
-        }
+            logger.error(f"❌ 上下文查询处理失败: {e}")
+            return {
+                'answer': f"查询失败: {str(e)}",
+                'sources': [],
+                'query_type': 'error',
+                'processing_time': 0.0
+            }

@@ -1,0 +1,43 @@
+# LlamaReportPro 运行配置文件
+# 这个文件包含了应用的运行配置信息
+
+[app]
+name = "LlamaReportPro"
+description = "AI驱动的财务报告分析系统"
+main_file = "app.py"
+
+[server]
+# Streamlit 服务器配置
+framework = "streamlit"
+default_port = 5000
+host = "0.0.0.0"
+
+[commands]
+# 常用运行命令
+start = "streamlit run app.py --server.port 5000"
+start_dev = "streamlit run app.py --server.port 5000 --server.runOnSave true"
+start_production = "streamlit run app.py --server.port 5000 --server.headless true"
+
+[ports]
+# 端口配置
+streamlit = 5000
+alternative_1 = 3000
+alternative_2 = 3001
+alternative_3 = 3002
+
+[environment]
+# 环境要求
+python_version = "3.11+"
+required_packages = [
+    "streamlit",
+    "llama-index",
+    "openai",
+    "pandas",
+    "plotly"
+]
+
+[deployment]
+# 部署相关配置
+type = "web_app"
+auto_scale = true
+health_check_path = "/"

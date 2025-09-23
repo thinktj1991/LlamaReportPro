@@ -316,6 +316,7 @@ def show_table_analysis():
         selected_doc = st.selectbox(
             "选择目标文档：",
             ["所有文档"] + list(st.session_state.extracted_tables.keys()),
+            key="analysis_doc_selector",
             help="选择要分析的特定文档，或查看所有文档"
         )
     
@@ -538,6 +539,7 @@ def show_text_content(doc_data):
         page_num = st.selectbox(
             "Select Page:",
             range(1, len(doc_data['documents']) + 1),
+            key="text_content_page_selector",
             format_func=lambda x: f"Page {x}"
         )
         

@@ -52,24 +52,24 @@ def show_insights_page():
             """)
             
             # Show preview tabs even without data for better UX
-            tab1, tab2, tab3, tab4, tab5 = st.tabs([
-                "🔍 异常检测", "⚠️ 风险分析", 
+            preview_tab1, preview_tab2, preview_tab3, preview_tab4, preview_tab5 = st.tabs([
+                "🔍 异常检测", "⚠️ 风险分析",
                 "🤖 AI洞察", "📊 模式分析", "📈 时间序列预测"
             ])
             
-            with tab1:
+            with preview_tab1:
                 st.info("**🔍 异常检测预览**\n\n使用孤立森林算法的基于机器学习的不寻常财务模式识别。")
-            
-            with tab2:
+
+            with preview_tab2:
                 st.info("**⚠️ 风险分析预览**\n\n系统性的财务风险评估，包括流动性危机、过度杠杆和运营效率低下模式。")
-            
-            with tab3:
+
+            with preview_tab3:
                 st.info("**🤖 AI洞察预览**\n\n自动生成综合性能、风险、异常和对比分析的商业智能。")
-            
-            with tab4:
+
+            with preview_tab4:
                 st.info("**📊 模式分析预览**\n\n高级模式识别和趋势分析，包含预测信号。")
-            
-            with tab5:
+
+            with preview_tab5:
                 st.info("**📈 预测预览**\n\n使用ARIMA模型的高级时间序列预测、情景分析和增长预测。")
             
             return
@@ -94,24 +94,24 @@ def show_insights_page():
         </div>
         """, unsafe_allow_html=True)
         
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "🔍 异常检测", "⚠️ 风险分析", 
+        main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
+            "🔍 异常检测", "⚠️ 风险分析",
             "🤖 AI洞察", "📊 模式分析", "📈 时间序列预测"
         ])
         
-        with tab1:
+        with main_tab1:
             show_anomaly_detection()
         
-        with tab2:
+        with main_tab2:
             show_risk_analysis()
-        
-        with tab3:
+
+        with main_tab3:
             show_ai_insights()
-        
-        with tab4:
+
+        with main_tab4:
             show_pattern_analysis()
-        
-        with tab5:
+
+        with main_tab5:
             show_forecasting_analysis()
             
     except Exception as e:
@@ -162,7 +162,7 @@ def show_anomaly_detection():
         # Anomaly visualization
         anomaly_chart = st.session_state.insights_engine.create_anomaly_visualization(anomalies)
         if anomaly_chart:
-            st.plotly_chart(anomaly_chart, use_container_width=True)
+            st.plotly_chart(anomaly_chart, use_container_width=True, key="anomaly_detection_chart")
         
         # Detailed anomaly breakdown
         st.subheader("🚨 Detailed Anomaly Analysis")
@@ -244,7 +244,7 @@ def show_risk_analysis():
         # Risk heatmap
         risk_heatmap = st.session_state.insights_engine.create_risk_heatmap(risks)
         if risk_heatmap:
-            st.plotly_chart(risk_heatmap, use_container_width=True)
+            st.plotly_chart(risk_heatmap, use_container_width=True, key="insights_risk_analysis_heatmap_main")
         
         # Risk recommendations
         recommendations = risks.get('recommendations', [])
@@ -403,7 +403,7 @@ def show_ai_insights():
                 'anomaly_count': anomaly_count
             }
         }
-        add_export_section('insights', insights_data)
+        add_export_section('ai_insights', insights_data, key_namespace='insights')
         
     except Exception as e:
         logger.error(f"Error generating AI insights: {str(e)}")
@@ -533,21 +533,24 @@ def show_forecasting_analysis():
             forecast_metric = st.selectbox(
                 "选择要预测的指标",
                 ['revenue', 'profit', 'total_assets', 'operating_income', 'net_income'],
+                key="insights_forecast_metric_selector_main",
                 help="选择用于时间序列预测的财务指标"
             )
-        
+
         with col2:
             forecast_periods = st.selectbox(
                 "Forecast Periods",
                 [6, 12, 18, 24],
                 index=1,
+                key="insights_forecast_periods_selector_main",
                 help="Number of future periods to forecast (months)"
             )
-        
+
         with col3:
             include_scenarios = st.checkbox(
                 "Generate Scenarios",
                 value=True,
+                key="insights_forecast_scenarios_checkbox_main",
                 help="Include conservative, moderate, and optimistic scenarios"
             )
         
@@ -613,24 +616,25 @@ def show_forecasting_analysis():
             # Multi-company dashboard
             dashboard_chart = st.session_state.forecasting_viz.create_multi_company_forecast_dashboard(forecasts)
             if dashboard_chart:
-                st.plotly_chart(dashboard_chart, use_container_width=True)
-            
+                st.plotly_chart(dashboard_chart, use_container_width=True, key="forecast_dashboard_chart")
+
             # Growth trajectory comparison
             growth_chart = st.session_state.forecasting_viz.create_growth_trajectory_comparison(forecasts)
             if growth_chart:
-                st.plotly_chart(growth_chart, use_container_width=True)
-            
+                st.plotly_chart(growth_chart, use_container_width=True, key="growth_trajectory_chart")
+
             # Model performance metrics
             performance_chart = st.session_state.forecasting_viz.create_forecast_accuracy_metrics(forecasts)
             if performance_chart:
-                st.plotly_chart(performance_chart, use_container_width=True)
+                st.plotly_chart(performance_chart, use_container_width=True, key="forecast_performance_chart")
             
             # Individual company analysis
             st.subheader("🏢 Individual Company Forecasts")
             
             selected_company = st.selectbox(
                 "Select Company for Detailed Analysis",
-                [f['company'] for f in forecasts]
+                [f['company'] for f in forecasts],
+                key="insights_forecast_company_selector_main"
             )
             
             if selected_company:
@@ -648,15 +652,15 @@ def show_forecasting_analysis():
                     )
                     
                     if detailed_chart:
-                        st.plotly_chart(detailed_chart, use_container_width=True)
-                    
+                        st.plotly_chart(detailed_chart, use_container_width=True, key=f"detailed_forecast_chart_{selected_company}")
+
                     # Scenario analysis
                     if scenarios:
                         scenario_chart = st.session_state.forecasting_viz.create_scenario_analysis_chart(
                             company_forecast, scenarios
                         )
                         if scenario_chart:
-                            st.plotly_chart(scenario_chart, use_container_width=True)
+                            st.plotly_chart(scenario_chart, use_container_width=True, key=f"scenario_analysis_chart_{selected_company}")
                     
                     # Detailed metrics
                     with st.expander(f"📈 Detailed Forecast Metrics - {selected_company}"):
@@ -743,7 +747,7 @@ def show_forecasting_analysis():
         # Add export functionality for forecasts
         if hasattr(st.session_state, 'forecasts') and st.session_state.forecasts:
             st.divider()
-            add_export_section('forecasting', st.session_state.forecasts)
+            add_export_section('forecasting', st.session_state.forecasts, key_namespace='insights')
         
     except Exception as e:
         logger.error(f"Error in forecasting analysis: {str(e)}")

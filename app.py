@@ -3,6 +3,23 @@ import os
 from pathlib import Path
 from utils.state import init_state, get_processing_stats
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    print("✅ .env文件加载成功")
+except ImportError:
+    print("⚠️ python-dotenv未安装，请运行: pip install python-dotenv")
+except Exception as e:
+    print(f"⚠️ 加载.env文件时出错: {e}")
+
+# Apply nest_asyncio early to prevent event loop issues
+try:
+    import nest_asyncio
+    nest_asyncio.apply()
+except ImportError:
+    pass
+
 # Set page configuration
 st.set_page_config(
     page_title="年报分析系统",

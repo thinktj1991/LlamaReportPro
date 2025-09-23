@@ -94,12 +94,25 @@ class TableExtractor:
                 # Extract tables from detailed content
                 if 'detailed_content' in doc_data:
                     for page in doc_data['detailed_content']['pages']:
-                        for table_info in page['tables']:
-                            processed_table = self._process_table(
-                                table_info['data'], 
-                                doc_name, 
-                                page['page_number'],
-                                table_info['table_id']
+                        # 安全地检查tables字段是否存在
+                        if 'tables' in page and isinstance(page['tables'], list):
+                            for table_info in page['tables']:
+                                processed_table = self._process_table(
+                                    table_info['data'],
+                                    doc_name,
+                                    page['page_number'],
+                                    table_info['table_id']
+                                )
+                                if processed_table:
+                                    doc_tables.append(processed_table)
+
+                        # 对于CSV等数据文件，直接从页面数据创建表格
+                        elif 'data' in page and isinstance(page['data'], list):
+                            # CSV文件的数据处理
+                            processed_table = self._process_csv_data(
+                                page['data'],
+                                doc_name,
+                                page.get('page_number', 1)
                             )
                             if processed_table:
                                 doc_tables.append(processed_table)
@@ -112,7 +125,54 @@ class TableExtractor:
                 all_tables[doc_name] = []
         
         return all_tables
-    
+
+    def _process_csv_data(self, csv_data: List[Dict], doc_name: str, page_num: int) -> Optional[Dict]:
+        """
+        处理CSV数据格式的表格
+        """
+        try:
+            if not csv_data or len(csv_data) == 0:
+                return None
+
+            # 将CSV数据转换为DataFrame
+            df = pd.DataFrame(csv_data)
+
+            if df.empty:
+                return None
+
+            # 生成表格ID
+            table_id = f"csv_table_{page_num}"
+
+            # 分析表格
+            categorization = self._categorize_table(df)
+            importance_score = self._calculate_importance_score(df, categorization)
+
+            # 生成摘要
+            summary = self._generate_enhanced_table_summary(df, categorization)
+
+            table_info = {
+                'table_id': table_id,
+                'document': doc_name,
+                'page_number': page_num,
+                'dataframe': df,
+                'summary': summary,
+                'is_financial': categorization.get('is_financial', False),
+                'importance_score': importance_score,
+                'categorization': categorization,
+                'metadata': {
+                    'rows': len(df),
+                    'columns': len(df.columns),
+                    'data_type': 'csv',
+                    'shape_analysis': categorization.get('analysis_summary', {}).get('shape_analysis', {})
+                }
+            }
+
+            return table_info
+
+        except Exception as e:
+            logger.error(f"Error processing CSV data: {str(e)}")
+            return None
+
     def _process_table(self, raw_table: List[List], doc_name: str, page_num: int, table_id: str) -> Optional[Dict]:
         """
         Process a raw table into a structured format
@@ -140,13 +200,20 @@ class TableExtractor:
                 df = pd.DataFrame(cleaned_table[1:])
                 df.columns = [f'Column_{i}' for i in range(len(df.columns))]
             
-            # Clean column names
-            df.columns = [self._clean_column_name(col) for col in df.columns]
+            # Clean column names and ensure uniqueness
+            cleaned_columns = []
+            for i, col in enumerate(df.columns):
+                cleaned_col = self._clean_column_name(col)
+                # Ensure column names are unique
+                if cleaned_col in cleaned_columns:
+                    cleaned_col = f"{cleaned_col}_{i}"
+                cleaned_columns.append(cleaned_col)
+            df.columns = cleaned_columns
             
             # Remove empty rows and columns
             df = df.dropna(how='all').dropna(axis=1, how='all')
             
-            if df.empty:
+            if len(df) == 0 or len(df.columns) == 0:
                 return None
             
             # Perform comprehensive table analysis and categorization
@@ -243,19 +310,30 @@ class TableExtractor:
                 'header_quality': 0.0
             }
             
-            if df.empty or len(df.columns) == 0:
+            if len(df) == 0 or len(df.columns) == 0:
                 return analysis
             
             # Combine header text with first few rows for context
-            header_text = ' '.join(df.columns.astype(str)).lower()
+            # Fix: Convert columns to list of strings to avoid Series issues
+            header_text = ' '.join([str(col) for col in df.columns]).lower()
             
             # Add sample data from first 3 rows for better context
             sample_data = []
             try:
                 for i in range(min(3, len(df))):
                     row_data = df.iloc[i].astype(str).tolist()
-                    sample_data.extend(row_data)
-                header_text += ' ' + ' '.join(sample_data).lower()
+                    # Fix: Ensure all items are strings, not lists
+                    for item in row_data:
+                        if isinstance(item, (list, tuple)):
+                            sample_data.append(str(item))
+                        elif isinstance(item, str):
+                            sample_data.append(item)
+                        else:
+                            sample_data.append(str(item))
+
+                # Fix: Ensure all items are strings before joining
+                safe_sample_data = [str(item) for item in sample_data if item is not None]
+                header_text += ' ' + ' '.join(safe_sample_data).lower()
             except Exception as e:
                 logger.warning(f"Error adding sample data to header analysis: {str(e)}")
             
@@ -315,7 +393,7 @@ class TableExtractor:
         Calculate quality score for table headers
         """
         try:
-            if df.empty or len(df.columns) == 0:
+            if len(df) == 0 or len(df.columns) == 0:
                 return 0.0
             
             quality_score = 0.0
@@ -358,7 +436,7 @@ class TableExtractor:
                 'column_types': {}
             }
             
-            if df.empty:
+            if len(df) == 0 or len(df.columns) == 0:
                 return analysis
             
             total_cells = len(df) * len(df.columns)
@@ -383,10 +461,20 @@ class TableExtractor:
                     col_pattern_count = 0
                     
                     for cell_value in col_series:
-                        if pd.isna(cell_value) or cell_value.strip() == '' or str(cell_value).lower() in ['nan', 'none']:
+                        # Fix: Handle potential Series values safely
+                        try:
+                            # Convert to string first to avoid Series boolean issues
+                            cell_str_val = str(cell_value).strip()
+                            if cell_str_val == '' or cell_str_val.lower() in ['nan', 'none', 'null']:
+                                continue
+                            # Additional check for actual NaN values
+                            if pd.isna(cell_value):
+                                continue
+                        except Exception:
+                            # If any conversion fails, skip this cell
                             continue
-                            
-                        cell_str = str(cell_value).strip()
+
+                        cell_str = cell_str_val  # Use the already converted string
                         
                         # Check if cell contains numeric data
                         try:
@@ -424,7 +512,24 @@ class TableExtractor:
                                 break
                     
                     # Determine column type and metrics
-                    non_empty_cells = len(col_series) - col_series.isin(['', 'nan', 'none']).sum()
+                    # Fix: Handle Series boolean comparison properly
+                    try:
+                        # Convert to string and check for empty values safely
+                        col_str_series = col_series.astype(str)
+
+                        # Use explicit boolean operations to avoid ambiguity
+                        empty_values = ['', 'nan', 'none', 'NaN', 'None', 'null', 'NULL']
+                        empty_count = 0
+
+                        for val in col_str_series:
+                            if val in empty_values:
+                                empty_count += 1
+
+                        non_empty_cells = len(col_series) - empty_count
+                    except Exception as e:
+                        logger.warning(f"Error calculating non-empty cells for column {col}: {str(e)}")
+                        non_empty_cells = len(col_series)
+
                     if non_empty_cells > 0:
                         col_analysis['numeric_ratio'] = col_numeric_count / non_empty_cells
                         col_analysis['financial_patterns'] = col_pattern_count
@@ -502,7 +607,7 @@ class TableExtractor:
                 quality_score += numeric_consistency * 0.3
             
             # Check for reasonable data distribution
-            if not df.empty:
+            if len(df) > 0 and len(df.columns) > 0:
                 # Check if data has reasonable variance (not all identical)
                 variance_score = 0.0
                 for col in df.columns:
@@ -540,7 +645,7 @@ class TableExtractor:
                 'table_type_hint': 'other'
             }
             
-            if df.empty:
+            if len(df) == 0 or len(df.columns) == 0:
                 return analysis
             
             rows, cols = len(df), len(df.columns)
@@ -642,7 +747,7 @@ class TableExtractor:
                 'analysis_summary': {}
             }
             
-            if df.empty:
+            if len(df) == 0 or len(df.columns) == 0:
                 return categorization
             
             # Get all analysis components
@@ -733,11 +838,12 @@ class TableExtractor:
         """
         try:
             # Validate DataFrame is not empty
-            if df.empty or len(df.columns) == 0:
+            if len(df) == 0 or len(df.columns) == 0:
                 return False
             
             # Check column names and content for financial keywords
-            text_to_check = ' '.join(df.columns.astype(str)).lower()
+            # Fix: Convert columns to list of strings to avoid Series issues
+            text_to_check = ' '.join([str(col) for col in df.columns]).lower()
             
             # Add some cell content for checking
             sample_cells = []
@@ -745,14 +851,25 @@ class TableExtractor:
                 try:
                     # Safely get column data as Series
                     col_series = df[col]
-                    if not col_series.empty:
+                    # Fix: Use len() instead of .empty to avoid boolean ambiguity
+                    if len(col_series) > 0:
                         sample_data = col_series.astype(str).head(5).values.tolist()
-                        sample_cells.extend(sample_data)
+                        # Fix: Ensure all items are strings, not lists
+                        for item in sample_data:
+                            if isinstance(item, (list, tuple)):
+                                # Convert list/tuple to string
+                                sample_cells.append(str(item))
+                            elif isinstance(item, str):
+                                sample_cells.append(item)
+                            else:
+                                sample_cells.append(str(item))
                 except Exception as e:
                     logger.warning(f"Error processing column {col}: {str(e)}")
                     continue
-            
-            text_to_check += ' ' + ' '.join(sample_cells).lower()
+
+            # Fix: Ensure all items in sample_cells are strings before joining
+            safe_sample_cells = [str(cell) for cell in sample_cells if cell is not None]
+            text_to_check += ' ' + ' '.join(safe_sample_cells).lower()
             
             # Check for financial keywords
             financial_score = sum(1 for keyword in self.financial_keywords if keyword in text_to_check)
@@ -786,7 +903,7 @@ class TableExtractor:
         Calculate enhanced importance score using comprehensive table analysis
         """
         try:
-            if df.empty:
+            if len(df) == 0 or len(df.columns) == 0:
                 return 0.0
             
             # Extract analysis components from categorization
@@ -883,7 +1000,7 @@ class TableExtractor:
             # Fallback to basic scoring
             try:
                 basic_score = 0.5
-                if not df.empty:
+                if len(df) > 0 and len(df.columns) > 0:
                     # Simple fallback based on table size and density
                     size_factor = min(len(df) * len(df.columns) / 100, 0.3)
                     density = (df.count().sum() / (len(df) * len(df.columns))) if len(df) > 0 and len(df.columns) > 0 else 0
@@ -897,7 +1014,7 @@ class TableExtractor:
         Generate enhanced summary using comprehensive table analysis
         """
         try:
-            if df.empty or len(df.columns) == 0:
+            if len(df) == 0 or len(df.columns) == 0:
                 return "Empty table"
             
             summary_parts = []
@@ -974,7 +1091,7 @@ class TableExtractor:
         """
         try:
             # Validate DataFrame is not empty
-            if df.empty or len(df.columns) == 0:
+            if len(df) == 0 or len(df.columns) == 0:
                 return "Empty table"
             
             summary_parts = []
@@ -1043,9 +1160,32 @@ class TableExtractor:
                 
                 consolidated_data.append(df_copy)
             
-            # Concatenate all tables
+            # Concatenate all tables with proper handling of duplicate columns
             if consolidated_data:
+                # Ensure all DataFrames have unique column names before concatenating
+                for i, df_copy in enumerate(consolidated_data):
+                    # Check for duplicate column names and make them unique
+                    if df_copy.columns.duplicated().any():
+                        new_columns = []
+                        for j, col in enumerate(df_copy.columns):
+                            if col in new_columns:
+                                new_columns.append(f"{col}_{j}")
+                            else:
+                                new_columns.append(col)
+                        df_copy.columns = new_columns
+
                 consolidated_df = pd.concat(consolidated_data, ignore_index=True, sort=False)
+
+                # Final check for duplicate column names in the consolidated DataFrame
+                if consolidated_df.columns.duplicated().any():
+                    new_columns = []
+                    for j, col in enumerate(consolidated_df.columns):
+                        if col in new_columns:
+                            new_columns.append(f"{col}_{j}")
+                        else:
+                            new_columns.append(col)
+                    consolidated_df.columns = new_columns
+
                 return consolidated_df
             
             return None

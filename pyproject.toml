@@ -9,6 +9,7 @@ dependencies = [
     "llama-index-embeddings-openai>=0.5.1",
     "llama-index-llms-openai>=0.5.6",
     "llama-index-readers-file>=0.5.4",
+    "nest-asyncio>=1.5.6",
     "llama-parse>=0.6.54",
     "openai>=1.107.1",
     "openpyxl>=3.1.5",
@@ -22,4 +23,26 @@ dependencies = [
     "streamlit==1.28.1",
     "xlsxwriter>=3.2.5",
     "python-dotenv>=1.1.1",
+    "llama-index-retrievers-bm25>=0.3.0",
+    "llama-index-program-openai>=0.3.0",
+    "llama-index-question-gen-openai>=0.3.0",
+    "llama-index-agent-openai>=0.3.0",
+    "llama-index-tools-requests>=0.2.0",
+    # 第四阶段依赖 - 多模态支持
+    "llama-index-multi-modal-llms-openai>=0.3.0",
+    "llama-index-indices-managed-llama-cloud>=0.5.0",
+    # 第四阶段依赖 - 高级存储
+    "llama-index-vector-stores-chroma>=0.3.0",
+    "llama-index-vector-stores-qdrant>=0.3.0",
+    "llama-index-vector-stores-pinecone>=0.3.0",
+    "chromadb>=0.5.0",
+    "qdrant-client>=1.11.0",
+    # 第四阶段依赖 - 元数据提取
+    "llama-index-extractors-entity>=0.3.0",
+    "spacy>=3.7.0",
+    # 第四阶段依赖 - 知识图谱
+    "llama-index-graph-stores-simple>=0.3.0",
+    "networkx>=3.0",
+    # 第四阶段依赖 - 高级提示工程
+    "jinja2>=3.1.0",
 ]

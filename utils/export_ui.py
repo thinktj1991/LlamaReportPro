@@ -52,6 +52,11 @@ class ExportUI:
                 'icon': '🤖',
                 'description': 'Export AI-generated insights and anomaly detection results'
             },
+            'ai_insights': {
+                'name': 'AI Generated Insights',
+                'icon': '🧠',
+                'description': 'Export AI-generated insights and automated intelligence'
+            },
             'comprehensive': {
                 'name': 'Comprehensive Report',
                 'icon': '📄',
@@ -59,8 +64,9 @@ class ExportUI:
             }
         }
     
-    def show_export_panel(self, data_type: str, data: Any, 
-                         available_formats: List[str] = None) -> None:
+    def show_export_panel(self, data_type: str, data: Any,
+                         available_formats: List[str] = None,
+                         key_namespace: Optional[str] = None) -> None:
         """
         Show export panel with format selection and download options
         """
@@ -93,9 +99,13 @@ class ExportUI:
                     st.error("No export formats available")
                     return
                 
+                # Build unique key prefix if provided
+                key_prefix = f"{key_namespace}_" if key_namespace else ""
+
                 selected_format = st.selectbox(
                     "Export Format",
                     options=format_options,
+                    key=f"{key_prefix}export_format_{data_type}",
                     format_func=lambda x: format_labels[format_options.index(x)] if x in format_options else x,
                     help="Choose the export format for your data"
                 )
@@ -104,18 +114,20 @@ class ExportUI:
                 include_metadata = st.checkbox(
                     "Include Metadata",
                     value=True,
+                    key=f"{key_prefix}include_metadata_{data_type}",
                     help="Include analysis metadata and timestamps"
                 )
-            
+
             with col3:
                 custom_filename = st.text_input(
                     "Custom Filename",
                     value="",
+                    key=f"{key_prefix}custom_filename_{data_type}",
                     help="Optional custom filename (without extension)"
                 )
             
             # Export button
-            if st.button(f"🚀 Export as {selected_format.upper()}", type="primary"):
+            if st.button(f"🚀 Export as {selected_format.upper()}", type="primary", key=f"{key_prefix}export_button_{data_type}"):
                 self._handle_export(data_type, data, selected_format, custom_filename, include_metadata)
         
         except Exception as e:
@@ -134,15 +146,15 @@ class ExportUI:
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                if st.button(f"📄 CSV"):
+                if st.button(f"📄 CSV", key=f"quick_csv_{data_type}"):
                     self._handle_export(data_type, data, 'csv')
-            
+
             with col2:
-                if st.button(f"📊 Excel"):
+                if st.button(f"📊 Excel", key=f"quick_excel_{data_type}"):
                     self._handle_export(data_type, data, 'excel')
-            
+
             with col3:
-                if st.button(f"📋 PDF"):
+                if st.button(f"📋 PDF", key=f"quick_pdf_{data_type}"):
                     self._handle_export(data_type, data, 'pdf')
         
         except Exception as e:
@@ -314,6 +326,7 @@ class ExportUI:
                 "Select Data Types to Export",
                 options=available_types,
                 default=available_types,
+                key="batch_export_types",
                 format_func=lambda x: self.export_configs[x]['name']
             )
             
@@ -325,12 +338,13 @@ class ExportUI:
             batch_format = st.selectbox(
                 "Export Format",
                 options=['excel', 'pdf'],
+                key="batch_export_format",
                 format_func=lambda x: self.export_engine.supported_formats[x]['name'],
                 help="Batch export supports Excel (multiple sheets) and PDF (comprehensive report)"
             )
             
             # Export button
-            if st.button("🚀 Start Batch Export", type="primary"):
+            if st.button("🚀 Start Batch Export", type="primary", key="start_batch_export_button"):
                 self._handle_batch_export(selected_types, batch_format)
         
         except Exception as e:
@@ -400,8 +414,9 @@ class ExportUI:
             logger.error(f"Error handling batch export: {str(e)}")
             st.error(f"Batch export failed: {str(e)}")
 
-def add_export_section(data_type: str, data: Any, 
-                      available_formats: List[str] = None) -> None:
+def add_export_section(data_type: str, data: Any,
+                      available_formats: List[str] = None,
+                      key_namespace: Optional[str] = None) -> None:
     """
     Convenience function to add export section to any page
     """
@@ -412,7 +427,7 @@ def add_export_section(data_type: str, data: Any,
         export_ui = st.session_state.export_ui
         
         with st.expander("📁 Export Data", expanded=False):
-            export_ui.show_export_panel(data_type, data, available_formats)
+            export_ui.show_export_panel(data_type, data, available_formats, key_namespace=key_namespace)
     
     except Exception as e:
         logger.error(f"Error adding export section: {str(e)}")

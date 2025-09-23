@@ -203,7 +203,37 @@ class FinancialCalculator:
                     break
             
             if value is not None:
-                normalized[standard_name] = float(value)
+                # Handle different value types
+                try:
+                    if isinstance(value, dict):
+                        # Try to extract numeric value from dict
+                        if 'value' in value:
+                            numeric_value = value['value']
+                        elif 'amount' in value:
+                            numeric_value = value['amount']
+                        elif 'total' in value:
+                            numeric_value = value['total']
+                        else:
+                            # Skip if no recognizable numeric field
+                            continue
+                    elif isinstance(value, (int, float)):
+                        numeric_value = value
+                    elif isinstance(value, str):
+                        # Try to convert string to float
+                        try:
+                            numeric_value = float(value.replace(',', '').replace('%', '').replace('$', ''))
+                        except ValueError:
+                            continue
+                    else:
+                        continue
+
+                    # Validate numeric value
+                    if isinstance(numeric_value, (int, float)) and np.isfinite(numeric_value):
+                        normalized[standard_name] = float(numeric_value)
+
+                except Exception as e:
+                    logger.debug(f"Error normalizing metric {standard_name} with value {value}: {str(e)}")
+                    continue
         
         return normalized
     

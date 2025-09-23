@@ -189,40 +189,125 @@ class CompanyComparator:
         
         return stats
     
-    def create_comparison_table(self, company_data: Dict[str, Dict], 
+    def create_comparison_table(self, company_data: Dict[str, Dict],
                               metrics_to_compare: List[str]) -> pd.DataFrame:
         """
-        Create a comparison table for selected metrics
+        Create a comparison table for selected metrics with proper data type handling
         """
         try:
             if not company_data or not metrics_to_compare:
                 return pd.DataFrame()
-            
+
             comparison_data = []
-            
+
             for company_name, data in company_data.items():
                 row = {'Company': company_name, 'Year': data.get('year', 'Unknown')}
-                
-                # Add requested metrics
+
+                # Add requested metrics with proper type conversion
                 for metric in metrics_to_compare:
-                    value = data.get('financial_metrics', {}).get(metric, 'N/A')
-                    row[metric.title()] = value
-                
+                    raw_value = data.get('financial_metrics', {}).get(metric)
+                    cleaned_value = self._clean_financial_value(raw_value)
+                    row[metric.title()] = cleaned_value
+
                 # Add key statistics
                 key_stats = data.get('key_statistics', {})
                 row['Document Pages'] = key_stats.get('document_pages', 0)
                 row['Financial Tables'] = key_stats.get('financial_tables', 0)
                 row['Data Richness'] = f"{key_stats.get('data_richness_score', 0):.2f}"
-                
+
                 comparison_data.append(row)
-            
+
             df = pd.DataFrame(comparison_data)
+
+            # Ensure proper data types for Arrow compatibility
+            df = self._ensure_arrow_compatibility(df)
+
             return df
-            
+
         except Exception as e:
             logger.error(f"Error creating comparison table: {str(e)}")
             return pd.DataFrame()
-    
+
+    def _clean_financial_value(self, value):
+        """
+        Clean and standardize financial values for DataFrame compatibility
+        """
+        try:
+            if value is None:
+                return np.nan
+
+            # Handle dictionary values
+            if isinstance(value, dict):
+                if 'value' in value:
+                    return self._clean_financial_value(value['value'])
+                elif 'amount' in value:
+                    return self._clean_financial_value(value['amount'])
+                elif 'total' in value:
+                    return self._clean_financial_value(value['total'])
+                else:
+                    return np.nan
+
+            # Handle numeric values
+            if isinstance(value, (int, float)):
+                if np.isfinite(value):
+                    return float(value)
+                else:
+                    return np.nan
+
+            # Handle string values
+            if isinstance(value, str):
+                # Check for N/A variants
+                if value.strip().lower() in ['n/a', 'na', 'none', '', 'null']:
+                    return np.nan
+
+                # Try to convert string to number
+                try:
+                    # Remove common formatting
+                    cleaned = value.replace(',', '').replace('%', '').replace('$', '').replace('¥', '').strip()
+                    return float(cleaned)
+                except ValueError:
+                    return np.nan
+
+            # Handle other types
+            return np.nan
+
+        except Exception as e:
+            logger.debug(f"Error cleaning financial value {value}: {str(e)}")
+            return np.nan
+
+    def _ensure_arrow_compatibility(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Ensure DataFrame is compatible with Arrow serialization
+        """
+        try:
+            # Make a copy to avoid modifying original
+            df_clean = df.copy()
+
+            # Process each column
+            for col in df_clean.columns:
+                if col in ['Company', 'Year', 'Data Richness']:
+                    # Keep string columns as-is
+                    continue
+                else:
+                    # Convert numeric columns
+                    try:
+                        # Replace any remaining problematic values
+                        df_clean[col] = df_clean[col].replace(['N/A', 'None', None], np.nan)
+
+                        # Try to convert to numeric
+                        df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
+
+                    except Exception as e:
+                        logger.debug(f"Could not convert column {col} to numeric: {str(e)}")
+                        # If conversion fails, replace with NaN
+                        df_clean[col] = np.nan
+
+            return df_clean
+
+        except Exception as e:
+            logger.error(f"Error ensuring Arrow compatibility: {str(e)}")
+            return df
+
     def identify_available_metrics(self, company_data: Dict[str, Dict]) -> List[str]:
         """
         Identify metrics that are available across companies

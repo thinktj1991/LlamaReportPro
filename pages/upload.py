@@ -43,26 +43,30 @@ def show_upload_page():
         with col1:
             st.markdown("""
             **支持的文档类型:**
-            - ✅ 年度报告 (Annual Reports)
-            - ✅ 财务报告 (Financial Statements) 
-            - ✅ 公司报告 (Company Reports)
-            - ✅ 中英文PDF文档
+            - 📄 **PDF文档** - 年度报告、财务报告
+            - 📊 **Excel文件** - 财务数据表格 (.xlsx, .xls)
+            - 📝 **Word文档** - 公司报告 (.docx)
+            - 📈 **PowerPoint** - 演示文稿 (.pptx, .ppt)
+            - 📋 **CSV文件** - 财务数据
+            - 🖼️ **图像文件** - 图表截图 (.jpg, .png)
+            - 📄 **文本文件** - 纯文本报告 (.txt, .md)
             """)
         with col2:
             st.markdown("""
             **最佳实践:**
             - ✨ 文件大小: 小于200MB
-            - ✨ 文档质量: 高清PDF文档
-            - ✨ 文档结构: 包含财务表格
+            - ✨ 文档质量: 高清文档，清晰表格
+            - ✨ 数据结构: 包含财务指标和数据
             - ✨ 命名规范: 使用有意义的文件名
+            - ✨ 多格式支持: 可混合上传不同格式
             """)
     
     # File uploader with enhanced styling
     uploaded_files = st.file_uploader(
-        "拖放PDF文件到这里，或点击浏览选择",
-        type=['pdf'],
+        "拖放文件到这里，或点击浏览选择",
+        type=['pdf', 'docx', 'xlsx', 'xls', 'pptx', 'ppt', 'csv', 'txt', 'md', 'jpg', 'jpeg', 'png'],
         accept_multiple_files=True,
-        help="支持多个文件同时上传，系统会自动进行批量处理"
+        help="支持多种文件格式同时上传，系统会自动识别并处理不同类型的文档"
     )
     
     if uploaded_files:
@@ -164,16 +168,17 @@ def process_uploaded_files(uploaded_files):
         progress_text.text("1/4")
         
         for uploaded_file in uploaded_files:
-            is_valid, error_message = validate_pdf_file(uploaded_file)
+            is_valid, message = validate_uploaded_file(uploaded_file)
             validation_results.append({
                 'filename': uploaded_file.name,
                 'is_valid': is_valid,
-                'error_message': error_message,
+                'error_message': message,
                 'file_size': uploaded_file.size
             })
-            
+
             if is_valid:
                 valid_files.append(uploaded_file)
+                logger.info(f"文件验证成功: {uploaded_file.name} - {message}")
         
         # Show validation summary
         show_validation_summary(validation_results)
@@ -515,64 +520,124 @@ def show_final_processing_summary(validation_results, processing_results):
         else:
             st.success(f"✅ Successfully processed {successful_processing} out of {total_uploaded} files")
 
-def validate_pdf_file(uploaded_file) -> tuple[bool, str]:
+def validate_uploaded_file(uploaded_file) -> tuple[bool, str]:
     """
-    Validate uploaded PDF file with comprehensive checks
+    Validate uploaded file with comprehensive checks for multiple formats
     Returns (is_valid, error_message)
     """
     try:
-        # Check file size (limit to 50MB)
-        if uploaded_file.size > 50 * 1024 * 1024:
-            return False, f"File {uploaded_file.name} is too large ({uploaded_file.size:,} bytes). Please upload files smaller than 50MB."
-        
+        # Check file size (limit to 200MB for larger files like Excel/PowerPoint)
+        max_size = 200 * 1024 * 1024  # 200MB
+        if uploaded_file.size > max_size:
+            return False, f"文件 {uploaded_file.name} 过大 ({uploaded_file.size:,} 字节)。请上传小于200MB的文件。"
+
         # Check minimum file size (100 bytes)
         if uploaded_file.size < 100:
-            return False, f"File {uploaded_file.name} appears to be empty or corrupted."
-        
+            return False, f"文件 {uploaded_file.name} 似乎为空或已损坏。"
+
+        # Define supported file extensions
+        supported_extensions = {
+            '.pdf': 'PDF文档',
+            '.docx': 'Word文档',
+            '.xlsx': 'Excel文件',
+            '.xls': 'Excel文件',
+            '.pptx': 'PowerPoint文件',
+            '.ppt': 'PowerPoint文件',
+            '.csv': 'CSV数据文件',
+            '.txt': '文本文件',
+            '.md': 'Markdown文件',
+            '.jpg': 'JPEG图像',
+            '.jpeg': 'JPEG图像',
+            '.png': 'PNG图像'
+        }
+
         # Check file extension
-        if not uploaded_file.name.lower().endswith('.pdf'):
-            return False, f"File {uploaded_file.name} is not a PDF file. Only PDF files are supported."
+        file_ext = None
+        filename_lower = uploaded_file.name.lower()
+        for ext in supported_extensions:
+            if filename_lower.endswith(ext):
+                file_ext = ext
+                break
+
+        if file_ext is None:
+            supported_list = ', '.join(supported_extensions.keys())
+            return False, f"文件 {uploaded_file.name} 格式不支持。支持的格式: {supported_list}"
         
         # Validate filename (check for valid characters and length)
         import re
         filename = uploaded_file.name
         if len(filename) > 255:
-            return False, f"Filename {filename} is too long. Please use a shorter filename."
-        
+            return False, f"文件名 {filename} 过长。请使用较短的文件名。"
+
         # Check for potentially problematic characters
         if re.search(r'[<>:"/\\|?*]', filename):
-            return False, f"Filename {filename} contains invalid characters. Please use only letters, numbers, spaces, hyphens, and underscores."
-        
-        # Validate PDF header by reading first few bytes
+            return False, f"文件名 {filename} 包含无效字符。请只使用字母、数字、空格、连字符和下划线。"
+
+        # Perform file-type specific validation
         uploaded_file.seek(0)  # Reset file pointer
-        header = uploaded_file.read(8)
-        uploaded_file.seek(0)  # Reset again for future use
-        
-        if not header.startswith(b'%PDF-'):
-            return False, f"File {uploaded_file.name} does not appear to be a valid PDF (invalid header)."
-        
-        # Try to open with pdfplumber for basic PDF structure validation
-        import pdfplumber
-        try:
-            with pdfplumber.open(uploaded_file) as pdf:
-                # Check if PDF has any pages
-                if len(pdf.pages) == 0:
-                    return False, f"File {uploaded_file.name} contains no pages."
-                
-                # Try to access first page to ensure PDF is readable
-                first_page = pdf.pages[0]
-                _ = first_page.extract_text()  # This will raise an exception if PDF is corrupted
-                
-        except Exception as pdf_error:
-            return False, f"File {uploaded_file.name} appears to be corrupted or unreadable: {str(pdf_error)}"
-        finally:
-            uploaded_file.seek(0)  # Reset file pointer
-        
-        return True, ""
-        
+
+        if file_ext == '.pdf':
+            # Validate PDF header
+            header = uploaded_file.read(8)
+            uploaded_file.seek(0)
+
+            if not header.startswith(b'%PDF-'):
+                return False, f"文件 {uploaded_file.name} 不是有效的PDF文件（无效的文件头）。"
+
+            # Try to open with pdfplumber for basic PDF structure validation
+            import pdfplumber
+            try:
+                with pdfplumber.open(uploaded_file) as pdf:
+                    if len(pdf.pages) == 0:
+                        return False, f"PDF文件 {uploaded_file.name} 不包含任何页面。"
+
+                    # Try to access first page
+                    first_page = pdf.pages[0]
+                    _ = first_page.extract_text()
+
+            except Exception as pdf_error:
+                return False, f"PDF文件 {uploaded_file.name} 似乎已损坏或无法读取: {str(pdf_error)}"
+            finally:
+                uploaded_file.seek(0)
+
+        elif file_ext in ['.xlsx', '.xls']:
+            # Validate Excel files
+            try:
+                import pandas as pd
+                uploaded_file.seek(0)
+                # Try to read the first sheet
+                df = pd.read_excel(uploaded_file, nrows=1)
+                uploaded_file.seek(0)
+            except Exception as excel_error:
+                return False, f"Excel文件 {uploaded_file.name} 无法读取: {str(excel_error)}"
+
+        elif file_ext == '.csv':
+            # Validate CSV files
+            try:
+                import pandas as pd
+                uploaded_file.seek(0)
+                # Try to read first few rows
+                df = pd.read_csv(uploaded_file, nrows=1)
+                uploaded_file.seek(0)
+            except Exception as csv_error:
+                return False, f"CSV文件 {uploaded_file.name} 无法读取: {str(csv_error)}"
+
+        elif file_ext in ['.jpg', '.jpeg', '.png']:
+            # Validate image files
+            try:
+                from PIL import Image
+                uploaded_file.seek(0)
+                img = Image.open(uploaded_file)
+                img.verify()  # Verify it's a valid image
+                uploaded_file.seek(0)
+            except Exception as img_error:
+                return False, f"图像文件 {uploaded_file.name} 无法读取: {str(img_error)}"
+
+        return True, f"✅ {supported_extensions[file_ext]}验证通过"
+
     except Exception as e:
-        logger.error(f"Error validating file {uploaded_file.name}: {str(e)}")
-        return False, f"Unexpected error validating {uploaded_file.name}: {str(e)}"
+        logger.error(f"验证文件 {uploaded_file.name} 时出错: {str(e)}")
+        return False, f"验证文件 {uploaded_file.name} 时出错: {str(e)}"
 
 # Main execution for Streamlit multipage
 if __name__ == "__main__":

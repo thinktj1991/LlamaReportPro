@@ -45,15 +45,15 @@ class EnhancedPDFProcessor:
                 self.use_premium_parse = False
                 return
             
-            # Initialize LlamaParse with enhanced features  
+            # Initialize LlamaParse with enhanced features
             self.llama_parser = LlamaParse(
                 api_key=api_key,
                 result_type="markdown",  # Use markdown for better structure
                 num_workers=4,  # Parallel processing
                 verbose=True,
-                language="zh",  # Chinese support
-                # Premium features
-                parsing_instruction="""
+                language="ch_sim",  # Chinese simplified support (fixed from "zh")
+                # Premium features - using system_prompt instead of deprecated parsing_instruction
+                system_prompt="""
                 This document contains financial annual reports with complex tables, charts, and financial data.
                 Please extract:
                 1. All table content with precise structure preservation
@@ -82,11 +82,15 @@ class EnhancedPDFProcessor:
                 tmp_path = tmp_file.name
             
             result = await self._extract_content_with_llamaparse(tmp_path, uploaded_file.name)
-            
+
             # Clean up temporary file
             os.unlink(tmp_path)
-            
-            logger.info(f"Successfully processed {uploaded_file.name} with enhanced extraction")
+
+            method = result.get('extraction_method', '') if isinstance(result, dict) else ''
+            if isinstance(method, str) and method.startswith('llamaparse'):
+                logger.info(f"Successfully processed {uploaded_file.name} with enhanced extraction")
+            else:
+                logger.info(f"Processed {uploaded_file.name} via fallback (basic PDFReader)")
             return result
             
         except Exception as e:
@@ -107,11 +111,33 @@ class EnhancedPDFProcessor:
             # Try async processing with proper event loop handling
             try:
                 import asyncio
-                result = asyncio.run(self.process_uploaded_file_async(uploaded_file))
-                return result
-            except RuntimeError as e:
-                if "cannot be called from a running event loop" in str(e):
-                    logger.warning("Running event loop detected, using fallback")
+                import nest_asyncio
+
+                # Apply nest_asyncio to allow nested event loops
+                nest_asyncio.apply()
+
+                # Check if we're in an existing event loop
+                try:
+                    loop = asyncio.get_running_loop()
+                    if loop.is_running():
+                        # We're in a running loop, create a task instead of using asyncio.run
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            future = executor.submit(asyncio.run, self.process_uploaded_file_async(uploaded_file))
+                            result = future.result()
+                            return result
+                    else:
+                        # Loop exists but not running, safe to use asyncio.run
+                        result = asyncio.run(self.process_uploaded_file_async(uploaded_file))
+                        return result
+                except RuntimeError:
+                    # No running loop, safe to use asyncio.run
+                    result = asyncio.run(self.process_uploaded_file_async(uploaded_file))
+                    return result
+
+            except Exception as e:
+                if "Event loop is closed" in str(e) or "cannot be called from a running event loop" in str(e):
+                    logger.warning(f"Async processing failed ({str(e)}), using fallback")
                     return self._fallback_processing(uploaded_file)
                 else:
                     raise
@@ -152,6 +178,12 @@ class EnhancedPDFProcessor:
             
         except Exception as e:
             logger.error(f"LlamaParse extraction failed: {str(e)}")
+            # If credits exhausted / 402, disable premium parse for this session to avoid repeated failures
+            err_s = str(e)
+            if "402" in err_s or "Payment Required" in err_s or "credits" in err_s:
+                logger.warning("Disabling premium LlamaParse due to 402 / credits exhaustion")
+                self.use_premium_parse = False
+                self.llama_parser = None
             return self._fallback_processing_from_path(pdf_path, filename)
     
     async def _extract_enhanced_content(self, documents: List[Document], pdf_path: str) -> Dict[str, Any]:
@@ -810,24 +842,77 @@ class EnhancedPDFProcessor:
         Fallback processing from file path
         """
         try:
-            # Use basic PDFReader
+            # Use basic PDFReader for text pages
             documents = self.fallback_reader.load_data(Path(pdf_path))
-            
+
+            # Attempt table extraction with pdfplumber for better fallback quality
+            total_tables = 0
+            enhanced_pages = []
+            try:
+                import pdfplumber
+                with pdfplumber.open(pdf_path) as pdf:
+                    for i, page in enumerate(pdf.pages):
+                        page_entry = {
+                            'page_number': i + 1,
+                            'tables': [],
+                            'charts': [],
+                            'content_type': 'text'
+                        }
+                        try:
+                            tables = page.extract_tables()
+                            if tables:
+                                import pandas as pd
+                                for j, table in enumerate(tables):
+                                    if table and len(table) > 0:
+                                        # Normalize to DataFrame (best-effort headers)
+                                        headers = table[0] if table and len(table) > 1 else [f"col{k+1}" for k in range(len(table[0]) if table and table[0] else 0)]
+                                        data_rows = table[1:] if len(table) > 1 else []
+                                        try:
+                                            df = pd.DataFrame(data_rows, columns=headers)
+                                        except Exception:
+                                            df = pd.DataFrame(table)
+                                        page_entry['tables'].append({
+                                            'table_id': f"fallback_page_{i+1}_table_{j+1}",
+                                            'page_number': i + 1,
+                                            'dataframe': df,
+                                            'rows': len(df),
+                                            'columns': len(df.columns),
+                                            'extraction_method': 'fallback_pdfplumber'
+                                        })
+                                if page_entry['tables']:
+                                    total_tables += len(page_entry['tables'])
+                                    page_entry['content_type'] = 'table_rich'
+                        except Exception as te:
+                            logger.debug(f"pdfplumber table extraction error on page {i+1}: {te}")
+                        enhanced_pages.append(page_entry)
+            except Exception as pe:
+                logger.debug(f"pdfplumber fallback unavailable or failed: {pe}")
+
+            enhanced_content = {
+                'pages': enhanced_pages,
+                'tables': [t for p in enhanced_pages for t in p.get('tables', [])],
+                'charts': [],
+                'financial_sections': [],
+                'total_tables': total_tables,
+                'total_charts': 0,
+                'quality_score': 0.3
+            }
+
             result = {
                 'filename': filename,
                 'documents': documents,
-                'enhanced_content': {'pages': [], 'total_tables': 0, 'total_charts': 0, 'quality_score': 0.3},
+                'enhanced_content': enhanced_content,
                 'metadata': {'extraction_method': 'fallback'},
                 'page_count': len(documents),
                 'total_text_length': sum(len(doc.text) for doc in documents),
                 'extraction_method': 'basic_fallback',
-                'tables_extracted': 0,
+                'tables_extracted': total_tables,
                 'charts_detected': 0
             }
-            
+
             logger.warning(f"Used fallback processing for {filename}")
             return result
-            
+
         except Exception as e:
             logger.error(f"Fallback processing failed: {str(e)}")
             raise e

@@ -90,12 +90,24 @@ class InsightsEngine:
                     ratios = ratios_result['ratios']
                     # Create feature vector from ratios
                     features = []
-                    for metric in ['current_ratio', 'debt_to_equity', 'roa', 'roe', 'gross_margin', 
+                    for metric in ['current_ratio', 'debt_to_equity', 'roa', 'roe', 'gross_margin',
                                  'operating_margin', 'asset_turnover', 'times_interest_earned']:
-                        value = ratios.get(metric, 0)
-                        if value is None or np.isnan(value):
+                        ratio_data = ratios.get(metric, 0)
+
+                        # Extract numeric value from ratio data
+                        if isinstance(ratio_data, dict):
+                            value = ratio_data.get('value', 0)
+                        else:
+                            value = ratio_data
+
+                        # Ensure value is numeric and valid
+                        if value is None or (isinstance(value, float) and np.isnan(value)):
                             value = 0
-                        features.append(float(value))
+
+                        try:
+                            features.append(float(value))
+                        except (ValueError, TypeError):
+                            features.append(0.0)
                     
                     if len(features) == 8:  # Ensure we have all features
                         features_data.append(features)
@@ -180,24 +192,39 @@ class InsightsEngine:
                     
                     for indicator in pattern_config['indicators']:
                         if indicator in ratios and ratios[indicator] is not None:
-                            value = ratios[indicator]
+                            ratio_data = ratios[indicator]
+
+                            # Extract numeric value from ratio data
+                            if isinstance(ratio_data, dict):
+                                value = ratio_data.get('value')
+                            else:
+                                value = ratio_data
+
+                            # Skip if value is not numeric
+                            if value is None or not isinstance(value, (int, float)):
+                                continue
+
                             threshold = pattern_config['thresholds'].get(indicator)
-                            
+
                             if threshold is not None:
-                                # Check if risk threshold is breached
-                                if pattern_name in ['liquidity_crisis', 'declining_profitability', 'operational_inefficiency']:
-                                    # Lower values indicate higher risk
-                                    if value < threshold:
-                                        pattern_triggered = True
-                                        triggered_indicators.append(indicator)
-                                elif pattern_name == 'excessive_leverage':
-                                    # Higher debt ratios or lower coverage ratios indicate risk
-                                    if indicator in ['debt_to_equity', 'debt_ratio'] and value > threshold:
-                                        pattern_triggered = True
-                                        triggered_indicators.append(indicator)
-                                    elif indicator == 'times_interest_earned' and value < threshold:
-                                        pattern_triggered = True
-                                        triggered_indicators.append(indicator)
+                                try:
+                                    # Check if risk threshold is breached
+                                    if pattern_name in ['liquidity_crisis', 'declining_profitability', 'operational_inefficiency']:
+                                        # Lower values indicate higher risk
+                                        if value < threshold:
+                                            pattern_triggered = True
+                                            triggered_indicators.append(indicator)
+                                    elif pattern_name == 'excessive_leverage':
+                                        # Higher debt ratios or lower coverage ratios indicate risk
+                                        if indicator in ['debt_to_equity', 'debt_ratio'] and value > threshold:
+                                            pattern_triggered = True
+                                            triggered_indicators.append(indicator)
+                                        elif indicator == 'times_interest_earned' and value < threshold:
+                                            pattern_triggered = True
+                                            triggered_indicators.append(indicator)
+                                except TypeError:
+                                    # Skip comparison if types are incompatible
+                                    continue
                     
                     if pattern_triggered:
                         severity_weight = {'High': 3, 'Medium': 2, 'Low': 1}
@@ -466,8 +493,17 @@ class InsightsEngine:
                     data.get('financial_metrics', {}), company_name
                 )
                 if ratios_result and ratios_result.get('ratios'):
-                    for metric, value in ratios_result['ratios'].items():
-                        if value is not None and not np.isnan(value):
+                    for metric, ratio_data in ratios_result['ratios'].items():
+                        # Extract numeric value from ratio data
+                        if isinstance(ratio_data, dict):
+                            value = ratio_data.get('value')
+                        else:
+                            value = ratio_data
+
+                        # Check if value is valid numeric
+                        if (value is not None and
+                            isinstance(value, (int, float)) and
+                            not np.isnan(value)):
                             if metric not in all_ratios:
                                 all_ratios[metric] = []
                             all_ratios[metric].append(value)
@@ -483,20 +519,24 @@ class InsightsEngine:
             
             for metric, values in all_ratios.items():
                 if len(values) > 0:
-                    avg_value = np.mean(values)
-                    benchmark = benchmarks.get(metric)
-                    
-                    if benchmark:
-                        if metric in ['debt_to_equity']:  # Lower is better
-                            if avg_value < benchmark:
-                                strong_areas.append(metric)
-                            else:
-                                weak_areas.append(metric)
-                        else:  # Higher is better
-                            if avg_value > benchmark:
-                                strong_areas.append(metric)
-                            else:
-                                weak_areas.append(metric)
+                    try:
+                        avg_value = np.mean(values)
+                        benchmark = benchmarks.get(metric)
+
+                        if benchmark and isinstance(avg_value, (int, float)) and isinstance(benchmark, (int, float)):
+                            if metric in ['debt_to_equity']:  # Lower is better
+                                if avg_value < benchmark:
+                                    strong_areas.append(metric)
+                                else:
+                                    weak_areas.append(metric)
+                            else:  # Higher is better
+                                if avg_value > benchmark:
+                                    strong_areas.append(metric)
+                                else:
+                                    weak_areas.append(metric)
+                    except (TypeError, ValueError):
+                        # Skip if values cannot be processed
+                        continue
             
             if strong_areas:
                 insights.append(f"💪 **Strong Performance Areas**: Companies excel in {', '.join(strong_areas[:3])}")

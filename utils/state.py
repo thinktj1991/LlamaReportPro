@@ -63,9 +63,16 @@ def init_state():
         # Processing status flags
         if not hasattr(st.session_state, 'processing_complete'):
             st.session_state.processing_complete = False
-        
+
         if not hasattr(st.session_state, 'last_upload_time'):
             st.session_state.last_upload_time = None
+
+        # Question interface state
+        if not hasattr(st.session_state, 'temp_question'):
+            st.session_state.temp_question = ""
+
+        if not hasattr(st.session_state, 'persistent_question'):
+            st.session_state.persistent_question = ""
             
         logger.debug("Session state initialized successfully")
         return True

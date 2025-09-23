@@ -147,9 +147,17 @@ class PDFProcessor:
         }
         
         try:
-            for page in processed_data['detailed_content']['pages']:
-                stats['tables_found'] += len(page['tables'])
-                stats['images_found'] += page['images']
+            if 'detailed_content' in processed_data and 'pages' in processed_data['detailed_content']:
+                for page in processed_data['detailed_content']['pages']:
+                    # 安全地访问tables字段
+                    if 'tables' in page:
+                        stats['tables_found'] += len(page['tables'])
+                    # 安全地访问images字段
+                    if 'images' in page:
+                        if isinstance(page['images'], int):
+                            stats['images_found'] += page['images']
+                        elif isinstance(page['images'], list):
+                            stats['images_found'] += len(page['images'])
         except Exception as e:
             logger.error(f"Error calculating stats: {str(e)}")
         

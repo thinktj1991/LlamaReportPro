@@ -89,15 +89,17 @@ class DataVisualizer:
                 avg_importance = np.mean([table.get('importance_score', 0) for table in tables]) if tables else 0
                 importance_scores.append(avg_importance)
             
-            # Create subplot
+            # Create subplot with proper specs for pie chart
             fig = make_subplots(
                 rows=2, cols=2,
                 subplot_titles=(
                     'Total Tables per Document',
-                    'Financial Tables per Document', 
+                    'Financial Tables per Document',
                     'Average Importance Score',
                     'Table Type Distribution'
-                )
+                ),
+                specs=[[{"type": "bar"}, {"type": "bar"}],
+                       [{"type": "scatter"}, {"type": "domain"}]]  # domain type for pie chart
             )
             
             # Total tables
@@ -347,7 +349,7 @@ class DataVisualizer:
             fig = make_subplots(
                 rows=1, cols=2,
                 subplot_titles=('Source Relevance Scores', 'Source Types'),
-                specs=[[{"secondary_y": False}, {"type": "pie"}]]
+                specs=[[{"secondary_y": False}, {"type": "domain"}]]  # domain type for pie chart
             )
             
             # Relevance scores

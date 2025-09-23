@@ -13,6 +13,7 @@ load_dotenv()
 from utils.enhanced_pdf_processor import EnhancedPDFProcessor
 from utils.enhanced_query_engines import EnhancedQueryEngineManager
 from utils.pdf_processor import PDFProcessor  # Fallback
+from utils.multi_format_processor import MultiFormatProcessor
 from utils.rag_system import RAGSystem
 from utils.table_extractor import TableExtractor
 
@@ -27,6 +28,7 @@ class EnhancedSystemIntegrator:
         self.use_enhanced = os.getenv('USE_ENHANCED_LLAMAINDEX', 'false').lower() == 'true'
         self.enhanced_pdf_processor = None
         self.legacy_pdf_processor = None
+        self.multi_format_processor = None
         self.enhanced_query_manager = None
         self.rag_system = None
         self.table_extractor = None
@@ -35,18 +37,20 @@ class EnhancedSystemIntegrator:
     def _initialize_components(self):
         """Initialize components based on configuration"""
         try:
-            # Always initialize legacy components as fallback
+            # Always initialize core components
             self.legacy_pdf_processor = PDFProcessor()
+            self.multi_format_processor = MultiFormatProcessor()
             self.rag_system = RAGSystem()
             self.table_extractor = TableExtractor()
-            
+            logger.info("✅ Core components initialized")
+
             # Initialize enhanced components if enabled
             if self.use_enhanced:
                 try:
                     self.enhanced_pdf_processor = EnhancedPDFProcessor(use_premium_parse=True)
-                    logger.info("Enhanced PDF processor initialized")
+                    logger.info("✅ Enhanced PDF processor initialized")
                 except Exception as e:
-                    logger.warning(f"Failed to initialize enhanced PDF processor: {str(e)}")
+                    logger.warning(f"⚠️ Failed to initialize enhanced PDF processor: {str(e)}")
                     self.use_enhanced = False
             
             logger.info(f"System integrator initialized (enhanced: {self.use_enhanced})")
@@ -58,46 +62,55 @@ class EnhancedSystemIntegrator:
     
     def process_uploaded_file(self, uploaded_file) -> Dict[str, Any]:
         """
-        Process uploaded file with enhanced or legacy processor
+        Process uploaded file with appropriate processor based on file type
         """
         try:
-            if self.use_enhanced and self.enhanced_pdf_processor is not None:
-                logger.info(f"Processing {uploaded_file.name} with enhanced processor")
-                result = self.enhanced_pdf_processor.process_uploaded_file(uploaded_file)
-                
-                # Add compatibility layer for legacy system
-                if 'enhanced_content' in result:
-                    # Convert enhanced content to legacy format for compatibility
-                    result['detailed_content'] = self._convert_enhanced_to_legacy_format(
-                        result['enhanced_content']
-                    )
-                
-                result['processing_method'] = 'enhanced_llamaparse'
-                return result
-                
+            # 获取文件扩展名
+            file_ext = uploaded_file.name.lower().split('.')[-1] if '.' in uploaded_file.name else ''
+
+            # 对于PDF文件，优先使用增强处理器
+            if file_ext == 'pdf':
+                if self.use_enhanced and self.enhanced_pdf_processor is not None:
+                    logger.info(f"Processing PDF {uploaded_file.name} with enhanced processor")
+                    result = self.enhanced_pdf_processor.process_uploaded_file(uploaded_file)
+
+                    # Add compatibility layer for legacy system
+                    if 'enhanced_content' in result:
+                        result['detailed_content'] = self._convert_enhanced_to_legacy_format(
+                            result['enhanced_content']
+                        )
+
+                    result['processing_method'] = 'enhanced_llamaparse'
+                    return result
+                else:
+                    # 使用传统PDF处理器
+                    logger.info(f"Processing PDF {uploaded_file.name} with legacy processor")
+                    result = self.legacy_pdf_processor.process_uploaded_file(uploaded_file)
+                    result['processing_method'] = 'legacy_pdf'
+                    return result
             else:
-                logger.info(f"Processing {uploaded_file.name} with legacy processor")
-                if self.legacy_pdf_processor is None:
-                    return {
-                        'error': True,
-                        'error_message': 'No processor available',
-                        'processing_method': 'error'
-                    }
-                result = self.legacy_pdf_processor.process_uploaded_file(uploaded_file)
-                result['processing_method'] = 'legacy_basic'
+                # 对于其他格式，使用多格式处理器
+                logger.info(f"Processing {file_ext.upper()} file {uploaded_file.name} with multi-format processor")
+                result = self.multi_format_processor.process_uploaded_file(uploaded_file)
                 return result
-                
+
         except Exception as e:
             logger.error(f"Error in file processing: {str(e)}")
-            # Always fall back to legacy processor
-            if self.legacy_pdf_processor is not None:
-                logger.info("Falling back to legacy processor")
-                result = self.legacy_pdf_processor.process_uploaded_file(uploaded_file)
-                result['processing_method'] = 'legacy_fallback'
-                result['processing_error'] = str(e)
-                return result
-            else:
-                raise e
+            # 尝试降级处理
+            file_ext = uploaded_file.name.lower().split('.')[-1] if '.' in uploaded_file.name else ''
+
+            if file_ext == 'pdf' and self.legacy_pdf_processor is not None:
+                try:
+                    logger.info("Falling back to legacy PDF processor")
+                    result = self.legacy_pdf_processor.process_uploaded_file(uploaded_file)
+                    result['processing_method'] = 'legacy_fallback'
+                    result['processing_error'] = str(e)
+                    return result
+                except Exception as fallback_error:
+                    logger.error(f"Fallback processing also failed: {str(fallback_error)}")
+
+            # 如果所有处理都失败，抛出原始错误
+            raise e
     
     def _convert_enhanced_to_legacy_format(self, enhanced_content: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -239,9 +252,13 @@ class EnhancedSystemIntegrator:
         Get processing statistics with enhanced information
         """
         try:
-            # Get basic stats
-            if (self.enhanced_pdf_processor is not None and 
-                processed_data.get('processing_method', '').startswith('enhanced')):
+            # Get basic stats based on processing method
+            processing_method = processed_data.get('processing_method', 'unknown')
+
+            if processing_method == 'multi_format_processor' and self.multi_format_processor is not None:
+                stats = self.multi_format_processor.get_processing_stats(processed_data)
+            elif (self.enhanced_pdf_processor is not None and
+                  processing_method.startswith('enhanced')):
                 stats = self.enhanced_pdf_processor.get_processing_stats(processed_data)
             elif self.legacy_pdf_processor is not None:
                 stats = self.legacy_pdf_processor.get_processing_stats(processed_data)
@@ -257,6 +274,7 @@ class EnhancedSystemIntegrator:
                     'enhanced_pdf': self.enhanced_pdf_processor is not None,
                     'enhanced_query': self.enhanced_query_manager is not None,
                     'legacy_pdf': self.legacy_pdf_processor is not None,
+                    'multi_format': self.multi_format_processor is not None,
                     'rag_system': self.rag_system is not None
                 }
             }

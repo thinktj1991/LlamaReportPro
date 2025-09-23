@@ -31,16 +31,26 @@ def show_qa_page():
         <div style="text-align: center; padding: 3rem; background: #f8f9fa; border-radius: 12px; border: 2px dashed #dee2e6;">
             <h3 style="color: #6c757d;">📁 需要先处理文档</h3>
             <p style="color: #6c757d; font-size: 1.1rem;">请先上传并处理您的PDF文档，然后才能使用AI问答功能</p>
-            <div style="margin-top: 2rem;">
-                <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 0.75rem 2rem; border-radius: 25px; border: none; cursor: pointer;">
-                    🚀 去上传文档
-                </button>
-            </div>
         </div>
         """, unsafe_allow_html=True)
+
+        # Add a working Streamlit button for navigation
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col2:
+            if st.button("🚀 去上传文档", type="primary", use_container_width=True):
+                st.session_state.nav_page = "上传与处理"
+                st.rerun()
+
         return
     
-    if not st.session_state.rag_index:
+    # Check if RAG index is built - check both rag_index and rag_system.query_engine
+    rag_ready = (st.session_state.rag_index is not None or
+                 (hasattr(st.session_state, 'rag_system') and
+                  st.session_state.rag_system and
+                  hasattr(st.session_state.rag_system, 'query_engine') and
+                  st.session_state.rag_system.query_engine is not None))
+
+    if not rag_ready:
         st.markdown("""
         <div style="text-align: center; padding: 2rem; background: #fff3cd; border-radius: 12px; border-left: 4px solid #ffeaa7;">
             <h3 style="color: #856404;">🔍 智能索引正在构建中</h3>
@@ -57,6 +67,16 @@ def show_qa_page():
     # Initialize processors including RAG system and visualizer
     if not init_processors():
         st.error("初始化问答系统组件失败")
+        return
+
+    # Check if RAG system is properly initialized
+    if not st.session_state.rag_system:
+        st.error("RAG系统未正确初始化")
+        return
+
+    # Check if RAG system has a query engine
+    if not hasattr(st.session_state.rag_system, 'query_engine') or not st.session_state.rag_system.query_engine:
+        st.warning("RAG系统索引未构建，请先上传并处理文档")
         return
     
     # Enhanced API key check
@@ -190,6 +210,7 @@ def show_question_interface():
             company_filter = st.selectbox(
                 "聚焦特定公司：",
                 company_options,
+                key="qa_company_filter",
                 help="选择特定公司可以获得更精准的答案"
             )
         
@@ -198,6 +219,7 @@ def show_question_interface():
             doc_type_filter = st.selectbox(
                 "限制数据源：",
                 ["所有类型", "财务表格", "文本内容"],
+                key="qa_doc_type_filter",
                 help="选择数据源类型可以提高相关性"
             )
         
@@ -217,101 +239,213 @@ def show_question_interface():
     </div>
     """, unsafe_allow_html=True)
     
-    # Check for temp question from examples
-    initial_question = ""
-    if hasattr(st.session_state, 'temp_question'):
-        initial_question = st.session_state.temp_question
-        del st.session_state.temp_question
-    
-    # Question input with enhanced styling
+    # Initialize persistent question state if not exists
+    if 'persistent_question' not in st.session_state:
+        st.session_state.persistent_question = ""
+
+    # Handle temp question from examples using proper widget state management
+    def load_question_value():
+        """Load saved question value to widget"""
+        if hasattr(st.session_state, 'temp_question') and st.session_state.temp_question:
+            # Transfer temp question to persistent storage
+            st.session_state.persistent_question = st.session_state.temp_question
+            logger.info(f"📝 Transferred temp_question to persistent: '{st.session_state.temp_question}'")
+            # Clear temp question
+            st.session_state.temp_question = ""
+        # Load persistent value to widget key
+        st.session_state._question_input = st.session_state.persistent_question
+
+    def store_question_value():
+        """Store widget value to persistent storage"""
+        st.session_state.persistent_question = st.session_state._question_input
+        logger.info(f"📝 Stored question to persistent: '{st.session_state.persistent_question}'")
+
+    # Load the saved value to the widget
+    load_question_value()
+
+    # Question input with enhanced styling and proper state management
     question = st.text_area(
         "请输入您的问题：",
-        value=initial_question,
         placeholder="例如：\n• 公司在最新年报中的总收入是多少？\n• 主要的财务指标表现如何？\n• 有哪些风险因素需要关注？\n• What are the key business segments mentioned in the report?",
         height=120,
-        help="您可以问关于财务数据、公司表现、或文档中任何内容的具体问题"
+        help="您可以问关于财务数据、公司表现、或文档中任何内容的具体问题",
+        key="_question_input",
+        on_change=store_question_value
     )
+
+    # Debug: Log the question value
+    logger.info(f"📝 Question input value: '{question}' (length: {len(question.strip()) if question else 0})")
+    logger.info(f"📝 Persistent question: '{st.session_state.persistent_question}'")
     
     # Enhanced action buttons
-    button_col1, button_col2, button_col3 = st.columns([2, 1, 1])
-    
+    button_col1, button_col2, button_col3, button_col4 = st.columns([1, 1, 1, 1])
+
+    with button_col1:
+        # Test button to verify button clicks work
+        test_button = st.button(
+            "🧪 测试",
+            use_container_width=True,
+            help="测试按钮点击是否工作"
+        )
+
     with button_col2:
         ask_button = st.button(
-            "🎆 发送问题", 
-            type="primary", 
+            "🎆 发送问题",
+            type="primary",
             use_container_width=True,
             help="点击发送问题给AI助手"
         )
-    
+
     with button_col3:
+        def clear_question():
+            """Clear the question input"""
+            st.session_state.persistent_question = ""
+            st.session_state._question_input = ""
+            logger.info("🗑️ Question cleared")
+
         clear_button = st.button(
-            "🗑️ 清空", 
+            "🗑️ 清空",
             use_container_width=True,
-            help="清除当前输入的问题"
+            help="清除当前输入的问题",
+            on_click=clear_question
         )
     
-    # Handle button actions
+    # Handle button actions with detailed debugging
+    if test_button:
+        logger.info("🧪 Test button clicked!")
+        st.success("✅ 测试按钮工作正常！按钮点击事件已被正确捕获。")
+        st.balloons()
+
     if clear_button:
+        logger.info("🗑️ Clear button clicked")
         st.rerun()
-    
-    if ask_button and question.strip():
-        ask_question(question, company_filter, doc_type_filter, year_filter)
-    elif ask_button:
-        st.markdown("""
-        <div style="background: #fff3cd; color: #856404; padding: 1rem; border-radius: 8px; border-left: 4px solid #ffeaa7;">
-            <strong>⚠️ 请输入问题</strong><br>
-            请在上方文本框中输入您想要咨询的问题
-        </div>
-        """, unsafe_allow_html=True)
+
+    if ask_button:
+        logger.info(f"🎆 Ask button clicked! Question: '{question[:50]}...' (length: {len(question)})")
+        logger.info(f"📊 Session state check - processed_documents: {len(st.session_state.processed_documents) if st.session_state.processed_documents else 0}")
+        logger.info(f"🤖 Session state check - rag_system exists: {st.session_state.rag_system is not None}")
+
+        if st.session_state.rag_system:
+            logger.info(f"🔍 RAG system query_engine exists: {hasattr(st.session_state.rag_system, 'query_engine') and st.session_state.rag_system.query_engine is not None}")
+
+        if question.strip():
+            logger.info("✅ Question is valid, calling ask_question function")
+            try:
+                ask_question(question, company_filter, doc_type_filter, year_filter)
+            except Exception as e:
+                logger.error(f"❌ Error in ask_question: {str(e)}")
+                st.error(f"处理问题时发生错误: {str(e)}")
+        else:
+            logger.warning("⚠️ Question is empty or only whitespace")
+            st.markdown("""
+            <div style="background: #fff3cd; color: #856404; padding: 1rem; border-radius: 8px; border-left: 4px solid #ffeaa7;">
+                <strong>⚠️ 请输入问题</strong><br>
+                请在上方文本框中输入您想要咨询的问题
+            </div>
+            """, unsafe_allow_html=True)
 
 def ask_question(question, company_filter, doc_type_filter, year_filter):
     """
     Process a question through the RAG system
     """
+    logger.info(f"🚀 ask_question function called with question: '{question[:50]}...'")
+    logger.info(f"📋 Filters - Company: {company_filter}, Doc Type: {doc_type_filter}, Year: {year_filter}")
+
     try:
         # Prepare context filter
+        logger.info("📝 Preparing context filter...")
         context_filter = {}
-        
+
         if company_filter != "所有公司":
             context_filter['company'] = company_filter
-        
+            logger.info(f"🏢 Company filter set: {company_filter}")
+
         if doc_type_filter != "所有类型":
             # Map Chinese UI labels to internal codes
             if doc_type_filter == "财务表格":
                 context_filter['document_type'] = 'table_data'
             elif doc_type_filter == "文本内容":
                 context_filter['document_type'] = 'text_content'
-        
+            logger.info(f"📄 Document type filter set: {doc_type_filter}")
+
         if year_filter.strip():
             context_filter['year'] = year_filter.strip()
+            logger.info(f"📅 Year filter set: {year_filter}")
+
+        logger.info(f"🔧 Final context filter: {context_filter}")
         
         # Show processing status
-        with st.spinner("🔍 Searching documents and generating answer..."):
+        with st.spinner("🔍 正在搜索文档并生成答案..."):
+            # Debug information
+            logger.info(f"Processing question: {question[:50]}...")
+            logger.info(f"Context filter: {context_filter}")
+
+            # Check RAG system state before querying
+            if not st.session_state.rag_system:
+                raise Exception("RAG系统未初始化")
+
+            if not hasattr(st.session_state.rag_system, 'query_engine') or not st.session_state.rag_system.query_engine:
+                raise Exception("RAG系统索引未构建，请先处理文档")
+
             # Query the RAG system
             result = st.session_state.rag_system.query(question, context_filter)
+
+            # Log the result for debugging
+            logger.info(f"Query result: {result.get('error', False)}")
+            if result.get('error', False):
+                logger.error(f"Query error: {result.get('answer', 'Unknown error')}")
         
-        # Display results
-        display_answer_results(question, result)
+        # Display results with enhanced debugging
+        logger.info(f"🎨 About to display results...")
+        try:
+            display_answer_results(question, result)
+            logger.info(f"✅ Results displayed successfully")
+        except Exception as display_error:
+            logger.error(f"❌ Error displaying results: {str(display_error)}")
+            st.error(f"显示结果时出错: {str(display_error)}")
+
+            # Fallback: show raw result
+            st.subheader("🔧 调试信息")
+            st.json(result)
         
         # Store in query history
         store_query_in_history(question, result, context_filter)
     
     except Exception as e:
         logger.error(f"Error processing question: {str(e)}")
-        st.error(f"Error processing question: {str(e)}")
+        st.markdown(f"""
+        <div style="background: #f8d7da; color: #721c24; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #f5c6cb;">
+            <h4 style="margin: 0 0 0.5rem 0;">❌ 问题处理失败</h4>
+            <p style="margin: 0;"><strong>错误信息:</strong> {str(e)}</p>
+            <p style="margin: 0.5rem 0 0 0; font-size: 0.9rem;">请检查您的问题格式，或稍后重试</p>
+        </div>
+        """, unsafe_allow_html=True)
 
 def display_answer_results(question, result):
     """
     Display the answer and sources
     """
+    logger.info(f"🎨 display_answer_results called with question: '{question[:50]}...'")
+    logger.info(f"📊 Result keys: {list(result.keys()) if result else 'None'}")
+    logger.info(f"❌ Error status: {result.get('error', False) if result else 'No result'}")
+    logger.info(f"💬 Answer preview: '{str(result.get('answer', 'No answer'))[:100]}...' if result else 'No result'")
+
     st.subheader("💡 Answer")
-    
+
+    if not result:
+        logger.error("❌ No result provided to display_answer_results")
+        st.error("❌ 没有收到查询结果")
+        return
+
     if result.get('error', False):
+        logger.error(f"❌ Query returned error: {result.get('answer', 'Unknown error')}")
         st.error(f"Error: {result['answer']}")
         return
-    
+
     # Display the answer
-    st.markdown(result['answer'])
+    answer = result.get('answer', '没有找到答案')
+    logger.info(f"✅ Displaying answer: '{answer[:100]}...'")
+    st.markdown(answer)
     
     # Display sources
     sources = result.get('sources', [])
@@ -550,7 +684,9 @@ def show_example_questions():
                     help="点击直接使用这个示例问题"
                 ):
                     # Set the example question for use in the interface
+                    logger.info(f"🎯 Example question clicked: '{question}'")
                     st.session_state.temp_question = question
+                    logger.info(f"💾 Stored temp_question in session state")
                     st.rerun()
             
             st.markdown("<hr style='margin: 1rem 0; border: none; height: 1px; background: #dee2e6;'>", unsafe_allow_html=True)

@@ -1,0 +1,39 @@
+# LlamaReportPro 依赖列表
+# 核心框架
+streamlit>=1.47.0
+pandas>=2.2.0
+numpy>=1.26.0
+
+# LlamaIndex 核心
+llama-index>=0.13.0
+llama-index-core>=0.12.0
+llama-index-llms-openai>=0.4.0
+llama-index-embeddings-openai>=0.5.0
+
+# LlamaIndex 扩展
+llama-index-question-gen-openai>=0.3.0
+llama-index-agent-openai>=0.4.0
+llama-index-program-openai>=0.3.0
+llama-index-tools-requests>=0.4.0
+llama-index-multi-modal-llms-openai>=0.6.0
+llama-index-retrievers-bm25>=0.5.0
+
+# 向量数据库
+chromadb>=1.1.0
+llama-index-vector-stores-chroma>=0.5.0
+qdrant-client>=1.11.0
+pinecone>=5.0.0
+
+# AI 和 ML
+openai>=1.99.0
+rank-bm25>=0.2.0
+onnxruntime>=1.22.0
+
+# 工具库
+jinja2>=3.1.0
+networkx>=3.4.0
+pydantic>=2.11.0
+python-dotenv>=1.0.0
+
+# 可选依赖
+llama-parse>=0.5.0

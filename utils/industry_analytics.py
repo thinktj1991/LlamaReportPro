@@ -141,8 +141,15 @@ class IndustryAnalytics:
                 
                 for company_name, ratios in company_ratios.items():
                     if metric in ratios and ratios[metric] is not None:
-                        value = ratios[metric]
-                        if isinstance(value, (int, float)) and not np.isnan(value):
+                        ratio_data = ratios[metric]
+
+                        # Extract value from ratio data structure
+                        if isinstance(ratio_data, dict):
+                            value = ratio_data.get('value')
+                        else:
+                            value = ratio_data
+
+                        if value is not None and isinstance(value, (int, float)) and not np.isnan(value):
                             metric_values.append(value)
                             company_metric_map[company_name] = value
                 
@@ -246,23 +253,58 @@ class IndustryAnalytics:
                     for metric, value in company_ratios.items():
                         if metric in benchmarks and value is not None:
                             benchmark = benchmarks[metric]
-                            
+
+                            # Type validation and conversion
+                            try:
+                                # Handle different value types
+                                if isinstance(value, dict):
+                                    # If value is a dict, try to extract a numeric value
+                                    if 'value' in value:
+                                        numeric_value = value['value']
+                                    elif 'amount' in value:
+                                        numeric_value = value['amount']
+                                    else:
+                                        # Skip this metric if we can't extract a numeric value
+                                        logger.debug(f"Skipping metric {metric} - value is dict without numeric field: {value}")
+                                        continue
+                                elif isinstance(value, (int, float)):
+                                    numeric_value = float(value)
+                                elif isinstance(value, str):
+                                    # Try to convert string to float
+                                    try:
+                                        numeric_value = float(value.replace(',', '').replace('%', ''))
+                                    except ValueError:
+                                        logger.debug(f"Skipping metric {metric} - cannot convert string to number: {value}")
+                                        continue
+                                else:
+                                    logger.debug(f"Skipping metric {metric} - unsupported type {type(value)}: {value}")
+                                    continue
+
+                                # Validate that we have a valid numeric value
+                                if not isinstance(numeric_value, (int, float)) or not np.isfinite(numeric_value):
+                                    logger.debug(f"Skipping metric {metric} - invalid numeric value: {numeric_value}")
+                                    continue
+
+                            except Exception as e:
+                                logger.debug(f"Error processing metric {metric} with value {value}: {str(e)}")
+                                continue
+
                             # Determine if higher is better for this metric
                             higher_is_better = self.metric_orientation.get(metric, True)
-                            
+
                             # Determine performance level based on metric orientation
                             if higher_is_better:
                                 # Standard comparison - higher values are better
-                                if value >= benchmark['excellent']:
+                                if numeric_value >= benchmark['excellent']:
                                     performance = 'Excellent'
                                     score = 4
-                                elif value >= benchmark['good']:
+                                elif numeric_value >= benchmark['good']:
                                     performance = 'Good'
                                     score = 3
-                                elif value >= benchmark['average']:
+                                elif numeric_value >= benchmark['average']:
                                     performance = 'Average'
                                     score = 2
-                                elif value >= benchmark['poor']:
+                                elif numeric_value >= benchmark['poor']:
                                     performance = 'Below Average'
                                     score = 1
                                 else:
@@ -270,16 +312,16 @@ class IndustryAnalytics:
                                     score = 0
                             else:
                                 # Inverse comparison - lower values are better
-                                if value <= benchmark['excellent']:
+                                if numeric_value <= benchmark['excellent']:
                                     performance = 'Excellent'
                                     score = 4
-                                elif value <= benchmark['good']:
+                                elif numeric_value <= benchmark['good']:
                                     performance = 'Good'
                                     score = 3
-                                elif value <= benchmark['average']:
+                                elif numeric_value <= benchmark['average']:
                                     performance = 'Average'
                                     score = 2
-                                elif value <= benchmark['poor']:
+                                elif numeric_value <= benchmark['poor']:
                                     performance = 'Below Average'
                                     score = 1
                                 else:
@@ -287,7 +329,8 @@ class IndustryAnalytics:
                                     score = 0
                             
                             benchmark_comparison['metrics'][metric] = {
-                                'value': value,
+                                'value': numeric_value,
+                                'original_value': value,
                                 'performance': performance,
                                 'score': score,
                                 'benchmarks': benchmark
