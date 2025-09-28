@@ -2,6 +2,22 @@
 headless = true
 address = "0.0.0.0"
 port = 5000
+# Fix for Windows "Paths don't have the same drive" error
+fileWatcherType = "poll"
+# Alternative: use "none" to completely disable file watching
+# fileWatcherType = "none"
+
+# Additional Windows-specific optimizations
+folderWatchBlacklist = [
+    "__pycache__",
+    ".git",
+    ".venv",
+    "venv",
+    "env",
+    "node_modules",
+    ".pytest_cache",
+    ".mypy_cache"
+]
 
 [browser]
 gatherUsageStats = false

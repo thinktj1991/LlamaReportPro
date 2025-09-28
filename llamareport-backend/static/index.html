@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LlamaReport Backend - 文档分析系统</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        
+        .main-content {
+            padding: 40px;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+            padding: 30px;
+            border: 2px solid #f0f0f0;
+            border-radius: 10px;
+            background: #fafafa;
+        }
+        
+        .section h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.8em;
+            border-bottom: 3px solid #4facfe;
+            padding-bottom: 10px;
+        }
+        
+        .upload-area {
+            border: 3px dashed #4facfe;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            background: white;
+            transition: all 0.3s ease;
+        }
+        
+        .upload-area:hover {
+            border-color: #00f2fe;
+            background: #f8f9ff;
+        }
+        
+        .upload-area.dragover {
+            border-color: #00f2fe;
+            background: #e8f4ff;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        .upload-btn {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .upload-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(79, 172, 254, 0.3);
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 1em;
+            margin: 5px;
+            transition: all 0.3s ease;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 15px rgba(0,0,0,0.2);
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .file-list {
+            margin-top: 20px;
+        }
+        
+        .file-item {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            border-left: 4px solid #4facfe;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
+        .query-area {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+        }
+        
+        .query-input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1.1em;
+            margin-bottom: 15px;
+            transition: border-color 0.3s ease;
+        }
+        
+        .query-input:focus {
+            outline: none;
+            border-color: #4facfe;
+        }
+        
+        .result-area {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+            min-height: 100px;
+            border: 2px solid #e0e0e0;
+        }
+        
+        .loading {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+        }
+        
+        .error {
+            color: #e74c3c;
+            background: #ffeaea;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #e74c3c;
+        }
+        
+        .success {
+            color: #27ae60;
+            background: #eafaf1;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #27ae60;
+        }
+        
+        .status-bar {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #17a2b8;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .main-content {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 LlamaReport Backend</h1>
+            <p>智能文档分析与问答系统</p>
+        </div>
+        
+        <div class="main-content">
+            <!-- 系统状态 -->
+            <div class="status-bar">
+                <strong>系统状态:</strong> <span id="systemStatus">检查中...</span>
+            </div>
+            
+            <div class="grid">
+                <!-- 文件上传区域 -->
+                <div class="section">
+                    <h2>📁 文件上传</h2>
+                    <div class="upload-area" id="uploadArea">
+                        <p style="font-size: 1.2em; margin-bottom: 20px;">拖拽PDF文件到此处或点击上传</p>
+                        <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+                            选择文件
+                        </button>
+                        <input type="file" id="fileInput" class="file-input" accept=".pdf" multiple>
+                        <p style="margin-top: 15px; color: #666;">支持PDF格式，最大50MB</p>
+                    </div>
+                    
+                    <div class="file-list" id="fileList">
+                        <!-- 文件列表将在这里显示 -->
+                    </div>
+                </div>
+                
+                <!-- 文档处理区域 -->
+                <div class="section">
+                    <h2>⚙️ 文档处理</h2>
+                    <p style="margin-bottom: 20px;">选择已上传的文件进行处理和索引构建</p>
+                    <select id="fileSelect" style="width: 100%; padding: 10px; margin-bottom: 15px; border: 2px solid #e0e0e0; border-radius: 5px;">
+                        <option value="">请先上传文件</option>
+                    </select>
+                    <div>
+                        <button class="btn" onclick="processFile()">🔄 处理文档</button>
+                        <button class="btn" onclick="getProcessStatus()">📊 查看状态</button>
+                    </div>
+                    <div id="processResult" class="result-area" style="display: none;">
+                        <!-- 处理结果将在这里显示 -->
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 智能问答区域 -->
+            <div class="section">
+                <h2>🤖 智能问答</h2>
+                <div class="query-area">
+                    <textarea id="queryInput" class="query-input" rows="3" 
+                              placeholder="请输入您的问题，例如：公司的营业收入是多少？"></textarea>
+                    <div>
+                        <button class="btn" onclick="askQuestion()">🔍 提问</button>
+                        <button class="btn" onclick="getSuggestions()">💡 获取建议</button>
+                        <button class="btn" onclick="clearResults()">🗑️ 清空结果</button>
+                    </div>
+                </div>
+                <div id="queryResult" class="result-area">
+                    <p class="loading">请先上传并处理文档，然后提出问题</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';  // 使用相对路径，因为前端和后端在同一域名
+        
+        // 页面加载时检查系统状态
+        window.onload = function() {
+            checkSystemStatus();
+            loadFileList();
+            setupEventListeners();
+        };
+        
+        function setupEventListeners() {
+            // 文件输入事件
+            document.getElementById('fileInput').addEventListener('change', handleFileSelect);
+            
+            // 拖拽事件
+            const uploadArea = document.getElementById('uploadArea');
+            uploadArea.addEventListener('dragover', handleDragOver);
+            uploadArea.addEventListener('dragleave', handleDragLeave);
+            uploadArea.addEventListener('drop', handleDrop);
+        }
+        
+        // 检查系统状态
+        async function checkSystemStatus() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                const statusElement = document.getElementById('systemStatus');
+                
+                if (data.status === 'healthy') {
+                    statusElement.innerHTML = '<span style="color: #27ae60;">✅ 系统正常运行</span>';
+                } else {
+                    statusElement.innerHTML = '<span style="color: #e74c3c;">⚠️ 系统状态异常</span>';
+                }
+            } catch (error) {
+                document.getElementById('systemStatus').innerHTML = '<span style="color: #e74c3c;">❌ 无法连接到服务器</span>';
+            }
+        }
+        
+        // 处理文件选择
+        function handleFileSelect(event) {
+            const files = event.target.files;
+            uploadFiles(files);
+        }
+        
+        // 处理拖拽
+        function handleDragOver(event) {
+            event.preventDefault();
+            event.currentTarget.classList.add('dragover');
+        }
+        
+        function handleDragLeave(event) {
+            event.currentTarget.classList.remove('dragover');
+        }
+        
+        function handleDrop(event) {
+            event.preventDefault();
+            event.currentTarget.classList.remove('dragover');
+            const files = event.dataTransfer.files;
+            uploadFiles(files);
+        }
+        
+        // 上传文件
+        async function uploadFiles(files) {
+            for (let file of files) {
+                if (file.type !== 'application/pdf') {
+                    showMessage('error', `文件 ${file.name} 不是PDF格式`);
+                    continue;
+                }
+                
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                try {
+                    showMessage('loading', `正在上传 ${file.name}...`);
+                    const response = await fetch('/upload/file', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (response.ok) {
+                        showMessage('success', `文件 ${result.filename} 上传成功`);
+                        loadFileList();
+                    } else {
+                        showMessage('error', `上传失败: ${result.detail}`);
+                    }
+                } catch (error) {
+                    showMessage('error', `上传失败: ${error.message}`);
+                }
+            }
+        }
+        
+        // 加载文件列表
+        async function loadFileList() {
+            try {
+                const response = await fetch('/upload/list');
+                const data = await response.json();
+                
+                const fileListElement = document.getElementById('fileList');
+                const fileSelectElement = document.getElementById('fileSelect');
+                
+                fileListElement.innerHTML = '';
+                fileSelectElement.innerHTML = '<option value="">选择要处理的文件</option>';
+                
+                if (data.files && data.files.length > 0) {
+                    data.files.forEach(file => {
+                        // 添加到文件列表显示
+                        const fileItem = document.createElement('div');
+                        fileItem.className = 'file-item';
+                        fileItem.innerHTML = `
+                            <span>${file.filename}</span>
+                            <span>${(file.file_size / 1024 / 1024).toFixed(2)} MB</span>
+                        `;
+                        fileListElement.appendChild(fileItem);
+                        
+                        // 添加到选择下拉框
+                        const option = document.createElement('option');
+                        option.value = file.filename;
+                        option.textContent = file.filename;
+                        fileSelectElement.appendChild(option);
+                    });
+                } else {
+                    fileListElement.innerHTML = '<p style="text-align: center; color: #666;">暂无上传的文件</p>';
+                }
+            } catch (error) {
+                console.error('加载文件列表失败:', error);
+            }
+        }
+        
+        // 处理文档
+        async function processFile() {
+            const selectedFile = document.getElementById('fileSelect').value;
+            if (!selectedFile) {
+                showMessage('error', '请先选择要处理的文件');
+                return;
+            }
+            
+            try {
+                showMessage('loading', '正在处理文档，请稍候...');
+                const response = await fetch('/process/file', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        filename: selectedFile,
+                        build_index: true
+                    })
+                });
+                
+                const result = await response.json();
+                const resultElement = document.getElementById('processResult');
+                
+                if (response.ok) {
+                    resultElement.style.display = 'block';
+                    resultElement.innerHTML = `
+                        <div class="success">
+                            <h3>✅ 文档处理成功</h3>
+                            <p><strong>文件:</strong> ${result.filename}</p>
+                            <p><strong>页数:</strong> ${result.processing_summary.document_info.page_count}</p>
+                            <p><strong>表格数量:</strong> ${result.processing_summary.table_info.total_tables}</p>
+                            <p><strong>索引状态:</strong> ${result.processing_summary.index_info.index_built ? '✅ 已构建' : '❌ 未构建'}</p>
+                        </div>
+                    `;
+                    showMessage('success', '文档处理完成，可以开始问答了！');
+                } else {
+                    showMessage('error', `处理失败: ${result.detail}`);
+                }
+            } catch (error) {
+                showMessage('error', `处理失败: ${error.message}`);
+            }
+        }
+        
+        // 获取处理状态
+        async function getProcessStatus() {
+            try {
+                const response = await fetch('/process/status');
+                const data = await response.json();
+                
+                const resultElement = document.getElementById('processResult');
+                resultElement.style.display = 'block';
+                resultElement.innerHTML = `
+                    <h3>📊 系统状态</h3>
+                    <p><strong>已上传文件:</strong> ${data.uploaded_files}</p>
+                    <p><strong>索引状态:</strong> ${data.index_status.status}</p>
+                    <p><strong>支持格式:</strong> ${data.supported_formats.join(', ')}</p>
+                `;
+            } catch (error) {
+                showMessage('error', `获取状态失败: ${error.message}`);
+            }
+        }
+        
+        // 提问
+        async function askQuestion() {
+            const question = document.getElementById('queryInput').value.trim();
+            if (!question) {
+                showMessage('error', '请输入问题');
+                return;
+            }
+            
+            try {
+                const resultElement = document.getElementById('queryResult');
+                resultElement.innerHTML = '<p class="loading">🤔 正在思考中...</p>';
+                
+                const response = await fetch('/query/ask', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        question: question
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    resultElement.innerHTML = `
+                        <h3>🤖 回答</h3>
+                        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0;">
+                            ${result.answer}
+                        </div>
+                        ${result.sources && result.sources.length > 0 ? `
+                            <h4>📚 参考来源</h4>
+                            <div style="font-size: 0.9em; color: #666;">
+                                ${result.sources.map(source => `
+                                    <div style="margin: 5px 0; padding: 8px; background: #fff; border-left: 3px solid #4facfe;">
+                                        ${source.text.substring(0, 100)}...
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                    `;
+                } else {
+                    resultElement.innerHTML = `<div class="error">❌ ${result.detail}</div>`;
+                }
+            } catch (error) {
+                document.getElementById('queryResult').innerHTML = `<div class="error">❌ 查询失败: ${error.message}</div>`;
+            }
+        }
+        
+        // 获取问题建议
+        async function getSuggestions() {
+            try {
+                const response = await fetch('/query/suggestions');
+                const data = await response.json();
+                
+                const resultElement = document.getElementById('queryResult');
+                resultElement.innerHTML = `
+                    <h3>💡 问题建议</h3>
+                    ${data.suggestions.map(category => `
+                        <div style="margin: 15px 0;">
+                            <h4 style="color: #4facfe;">${category.category}</h4>
+                            <ul style="margin-left: 20px;">
+                                ${category.questions.map(q => `
+                                    <li style="margin: 5px 0; cursor: pointer; color: #666;" 
+                                        onclick="document.getElementById('queryInput').value='${q}'">${q}</li>
+                                `).join('')}
+                            </ul>
+                        </div>
+                    `).join('')}
+                `;
+            } catch (error) {
+                showMessage('error', `获取建议失败: ${error.message}`);
+            }
+        }
+        
+        // 清空结果
+        function clearResults() {
+            document.getElementById('queryResult').innerHTML = '<p class="loading">请输入问题开始查询</p>';
+            document.getElementById('queryInput').value = '';
+        }
+        
+        // 显示消息
+        function showMessage(type, message) {
+            // 创建消息元素
+            const messageDiv = document.createElement('div');
+            messageDiv.className = type;
+            messageDiv.textContent = message;
+            messageDiv.style.position = 'fixed';
+            messageDiv.style.top = '20px';
+            messageDiv.style.right = '20px';
+            messageDiv.style.zIndex = '1000';
+            messageDiv.style.padding = '15px 20px';
+            messageDiv.style.borderRadius = '8px';
+            messageDiv.style.maxWidth = '400px';
+            messageDiv.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+            
+            document.body.appendChild(messageDiv);
+            
+            // 3秒后自动移除
+            setTimeout(() => {
+                if (messageDiv.parentNode) {
+                    messageDiv.parentNode.removeChild(messageDiv);
+                }
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,149 @@
+{
+  "科技创新公司": {
+    "company_info": {
+      "industry": "科技",
+      "founded": "2015",
+      "employees": 1200,
+      "description": "专注于人工智能和云计算的科技公司"
+    },
+    "financial_metrics": {
+      "revenue": 1500000000,
+      "net_income": 180000000,
+      "total_assets": 8000000000,
+      "total_liabilities": 3000000000,
+      "shareholders_equity": 5000000000,
+      "current_assets": 4000000000,
+      "current_liabilities": 1500000000,
+      "cash_and_equivalents": 2000000000,
+      "operating_cash_flow": 250000000,
+      "gross_margin": 0.65,
+      "net_margin": 0.12,
+      "roe": 0.036,
+      "roa": 0.0225,
+      "current_ratio": 2.67,
+      "debt_to_equity": 0.6,
+      "historical_revenue": [
+        1000000000,
+        1200000000,
+        1350000000,
+        1500000000
+      ],
+      "historical_net_income": [
+        100000000,
+        140000000,
+        160000000,
+        180000000
+      ],
+      "historical_years": [
+        "2020",
+        "2021",
+        "2022",
+        "2023"
+      ]
+    },
+    "risk_indicators": {
+      "liquidity_risk": "low",
+      "profitability_trend": "improving",
+      "debt_level": "moderate",
+      "cash_position": "strong"
+    }
+  },
+  "传统制造企业": {
+    "company_info": {
+      "industry": "制造业",
+      "founded": "1995",
+      "employees": 3500,
+      "description": "大型机械制造企业，产品出口全球"
+    },
+    "financial_metrics": {
+      "revenue": 2200000000,
+      "net_income": 110000000,
+      "total_assets": 12000000000,
+      "total_liabilities": 8000000000,
+      "shareholders_equity": 4000000000,
+      "current_assets": 5000000000,
+      "current_liabilities": 3000000000,
+      "cash_and_equivalents": 800000000,
+      "operating_cash_flow": 180000000,
+      "gross_margin": 0.35,
+      "net_margin": 0.05,
+      "roe": 0.0275,
+      "roa": 0.0092,
+      "current_ratio": 1.67,
+      "debt_to_equity": 2.0,
+      "historical_revenue": [
+        1800000000,
+        1950000000,
+        2100000000,
+        2200000000
+      ],
+      "historical_net_income": [
+        80000000,
+        95000000,
+        105000000,
+        110000000
+      ],
+      "historical_years": [
+        "2020",
+        "2021",
+        "2022",
+        "2023"
+      ]
+    },
+    "risk_indicators": {
+      "liquidity_risk": "medium",
+      "profitability_trend": "stable",
+      "debt_level": "high",
+      "cash_position": "adequate"
+    }
+  },
+  "新兴生物医药": {
+    "company_info": {
+      "industry": "生物医药",
+      "founded": "2018",
+      "employees": 800,
+      "description": "专注于创新药物研发的生物医药公司"
+    },
+    "financial_metrics": {
+      "revenue": 500000000,
+      "net_income": -50000000,
+      "total_assets": 3000000000,
+      "total_liabilities": 800000000,
+      "shareholders_equity": 2200000000,
+      "current_assets": 2000000000,
+      "current_liabilities": 400000000,
+      "cash_and_equivalents": 1500000000,
+      "operating_cash_flow": -80000000,
+      "gross_margin": 0.8,
+      "net_margin": -0.1,
+      "roe": -0.023,
+      "roa": -0.017,
+      "current_ratio": 5.0,
+      "debt_to_equity": 0.36,
+      "historical_revenue": [
+        100000000,
+        250000000,
+        380000000,
+        500000000
+      ],
+      "historical_net_income": [
+        -80000000,
+        -70000000,
+        -60000000,
+        -50000000
+      ],
+      "historical_years": [
+        "2020",
+        "2021",
+        "2022",
+        "2023"
+      ]
+    },
+    "risk_indicators": {
+      "liquidity_risk": "low",
+      "profitability_trend": "improving_losses",
+      "debt_level": "low",
+      "cash_position": "excellent"
+    }
+  }
+}
