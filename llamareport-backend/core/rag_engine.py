@@ -11,7 +11,7 @@ from llama_index.core import Document, VectorStoreIndex, StorageContext, Setting
 from llama_index.core.storage.docstore import SimpleDocumentStore
 from llama_index.core.storage.index_store import SimpleIndexStore
 from llama_index.vector_stores.chroma import ChromaVectorStore
-from llama_index.llms.openai import OpenAI
+from llama_index.llms.deepseek import DeepSeek
 from llama_index.embeddings.openai import OpenAIEmbedding
 import chromadb
 
@@ -43,29 +43,43 @@ class RAGEngine:
     def _setup_llama_index(self):
         """设置LlamaIndex配置"""
         try:
+            # 获取 API Keys
             openai_api_key = os.getenv("OPENAI_API_KEY")
+            deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+
             if not openai_api_key:
-                logger.warning("⚠️ OPENAI_API_KEY未设置，RAG功能将受限")
+                logger.warning("⚠️ OPENAI_API_KEY未设置，Embedding功能将受限")
                 return False
 
-            # 设置LLM
-            Settings.llm = OpenAI(
-                model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-                api_key=openai_api_key,
+            if not deepseek_api_key:
+                logger.warning("⚠️ DEEPSEEK_API_KEY未设置，对话功能将受限")
+                return False
+
+            # 设置LLM - 使用 DeepSeek 专用集成
+            deepseek_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+
+            Settings.llm = DeepSeek(
+                model=deepseek_model,
+                api_key=deepseek_api_key,
                 temperature=0.1
             )
 
-            # 设置嵌入模型
+            logger.info(f"✅ DeepSeek LLM配置成功 - 模型: {deepseek_model}")
+
+            # 设置嵌入模型 - 继续使用 OpenAI
             Settings.embed_model = OpenAIEmbedding(
                 model="text-embedding-3-small",
                 api_key=openai_api_key
             )
 
-            logger.info("✅ LlamaIndex配置成功")
+            logger.info("✅ OpenAI Embedding配置成功")
+            logger.info("✅ LlamaIndex配置成功 (DeepSeek LLM + OpenAI Embedding)")
             return True
 
         except Exception as e:
             logger.error(f"❌ LlamaIndex配置失败: {str(e)}")
+            import traceback
+            logger.error(f"详细错误: {traceback.format_exc()}")
             return False
     
     def _setup_chroma(self):

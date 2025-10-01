@@ -43,17 +43,22 @@ async def lifespan(app: FastAPI):
         logger.info(f"✅ 目录已创建: {directory}")
     
     # 检查环境变量
-    required_env_vars = ["OPENAI_API_KEY"]
+    required_env_vars = {
+        "OPENAI_API_KEY": "用于 Embedding 模型",
+        "DEEPSEEK_API_KEY": "用于对话模型"
+    }
     missing_vars = []
-    for var in required_env_vars:
+    for var, purpose in required_env_vars.items():
         if not os.getenv(var):
-            missing_vars.append(var)
-    
+            missing_vars.append(f"{var} ({purpose})")
+
     if missing_vars:
         logger.warning(f"⚠️ 缺少环境变量: {', '.join(missing_vars)}")
         logger.warning("⚠️ 某些功能可能无法正常工作")
     else:
         logger.info("✅ 环境变量检查通过")
+        logger.info(f"✅ 对话模型: DeepSeek ({os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')})")
+        logger.info(f"✅ 嵌入模型: OpenAI (text-embedding-3-small)")
     
     logger.info("✅ LlamaReport Backend 启动完成")
     
@@ -236,9 +241,12 @@ async def get_system_info():
                 "storage_size": f"{storage_size / (1024*1024):.2f} MB"
             },
             "configuration": {
-                "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
-                "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-                "embedding_model": "text-embedding-3-small"
+                "llm_provider": "DeepSeek",
+                "llm_model": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+                "llm_configured": bool(os.getenv("DEEPSEEK_API_KEY")),
+                "embedding_provider": "OpenAI",
+                "embedding_model": "text-embedding-3-small",
+                "embedding_configured": bool(os.getenv("OPENAI_API_KEY"))
             }
         }
         

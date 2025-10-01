@@ -24,9 +24,13 @@ class Config:
     DEBUG = os.getenv("DEBUG", "false").lower() == "true"
     
     # API配置
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # 用于 Embedding
     LLAMA_CLOUD_API_KEY = os.getenv("LLAMA_CLOUD_API_KEY")
-    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+    # DeepSeek 配置 (用于对话模型)
+    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+    DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     
     # 文件配置
     MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 50 * 1024 * 1024))  # 50MB
@@ -56,13 +60,22 @@ class Config:
     def validate(cls):
         """验证必要的配置项"""
         errors = []
-        
+        warnings = []
+
+        # OpenAI API Key (用于 Embedding)
         if not cls.OPENAI_API_KEY:
-            errors.append("OPENAI_API_KEY is required")
-        
+            errors.append("OPENAI_API_KEY is required for embeddings")
+
+        # DeepSeek API Key (用于对话模型)
+        if not cls.DEEPSEEK_API_KEY:
+            errors.append("DEEPSEEK_API_KEY is required for chat completions")
+
         if errors:
             raise ValueError(f"Configuration errors: {', '.join(errors)}")
-        
+
+        if warnings:
+            print(f"⚠️ Configuration warnings: {', '.join(warnings)}")
+
         return True
     
     @classmethod
@@ -74,6 +87,11 @@ class Config:
             "debug": cls.DEBUG,
             "max_file_size": cls.MAX_FILE_SIZE,
             "allowed_extensions": list(cls.ALLOWED_EXTENSIONS),
+            "llm_provider": "DeepSeek",
+            "llm_model": cls.DEEPSEEK_MODEL,
+            "embedding_provider": "OpenAI",
+            "embedding_model": "text-embedding-3-small",
+            "deepseek_configured": bool(cls.DEEPSEEK_API_KEY),
             "openai_configured": bool(cls.OPENAI_API_KEY),
             "llama_cloud_configured": bool(cls.LLAMA_CLOUD_API_KEY),
             "uploads_dir": str(cls.UPLOADS_DIR),
