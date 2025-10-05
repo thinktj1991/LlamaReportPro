@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import json
 import pandas as pd
+import requests
 from utils.rag_system import RAGSystem
 from utils.data_visualizer import DataVisualizer
 from utils.state import init_state, init_processors
@@ -281,22 +282,28 @@ def show_question_interface():
     button_col1, button_col2, button_col3, button_col4 = st.columns([1, 1, 1, 1])
 
     with button_col1:
-        # Test button to verify button clicks work
-        test_button = st.button(
-            "🧪 测试",
+        ask_button = st.button(
+            "🔍 提问",
             use_container_width=True,
-            help="测试按钮点击是否工作"
+            help="快速查询 - 使用原有系统"
         )
 
     with button_col2:
-        ask_button = st.button(
-            "🎆 发送问题",
+        agent_button = st.button(
+            "🤖 Agent 智能分析",
             type="primary",
             use_container_width=True,
-            help="点击发送问题给AI助手"
+            help="深度分析 - 使用新的 Agent 系统,输出结构化报告"
         )
 
     with button_col3:
+        report_button = st.button(
+            "📊 生成报告",
+            use_container_width=True,
+            help="生成完整的年报分析报告"
+        )
+
+    with button_col4:
         def clear_question():
             """Clear the question input"""
             st.session_state.persistent_question = ""
@@ -311,17 +318,12 @@ def show_question_interface():
         )
     
     # Handle button actions with detailed debugging
-    if test_button:
-        logger.info("🧪 Test button clicked!")
-        st.success("✅ 测试按钮工作正常！按钮点击事件已被正确捕获。")
-        st.balloons()
-
     if clear_button:
         logger.info("🗑️ Clear button clicked")
         st.rerun()
 
     if ask_button:
-        logger.info(f"🎆 Ask button clicked! Question: '{question[:50]}...' (length: {len(question)})")
+        logger.info(f"🔍 Ask button clicked! Question: '{question[:50]}...' (length: {len(question)})")
         logger.info(f"📊 Session state check - processed_documents: {len(st.session_state.processed_documents) if st.session_state.processed_documents else 0}")
         logger.info(f"🤖 Session state check - rag_system exists: {st.session_state.rag_system is not None}")
 
@@ -343,6 +345,25 @@ def show_question_interface():
                 请在上方文本框中输入您想要咨询的问题
             </div>
             """, unsafe_allow_html=True)
+
+    if agent_button:
+        logger.info(f"🤖 Agent button clicked! Question: '{question[:50]}...'")
+        if question.strip():
+            try:
+                ask_question_with_agent(question, company_filter, doc_type_filter, year_filter)
+            except Exception as e:
+                logger.error(f"❌ Error in ask_question_with_agent: {str(e)}")
+                st.error(f"Agent 分析时发生错误: {str(e)}")
+        else:
+            st.warning("⚠️ 请输入问题")
+
+    if report_button:
+        logger.info("📊 Report button clicked!")
+        try:
+            generate_full_report(company_filter, year_filter)
+        except Exception as e:
+            logger.error(f"❌ Error in generate_full_report: {str(e)}")
+            st.error(f"生成报告时发生错误: {str(e)}")
 
 def ask_question(question, company_filter, doc_type_filter, year_filter):
     """
@@ -726,6 +747,134 @@ def clear_query_history():
     """
     if st.button("🗑️ Clear History"):
         st.session_state.query_history = []
+
+
+def ask_question_with_agent(question, company_filter, doc_type_filter, year_filter):
+    """
+    使用 Agent 系统进行智能分析
+    """
+    import requests
+
+    logger.info(f"🤖 Starting Agent analysis for question: {question}")
+
+    # 显示加载状态
+    with st.spinner("🤖 Agent 正在进行深度分析...这可能需要几秒钟..."):
+        try:
+            # 调用 Agent API
+            backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+            response = requests.post(
+                f"{backend_url}/agent/query",
+                json={"question": question},
+                timeout=60
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+
+                if result.get("status") == "success":
+                    # 显示 Agent 的回答
+                    st.markdown("""
+                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 1.5rem; border-radius: 12px; color: white; margin: 2rem 0;">
+                        <h3 style="margin: 0 0 1rem 0;">🤖 Agent 智能分析结果</h3>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    # 使用 Markdown 渲染 Agent 的结构化输出
+                    st.markdown(result.get("answer", "无回答"))
+
+                    # 显示查询时间
+                    query_time = result.get("query_time", 0)
+                    st.caption(f"⏱️ 分析耗时: {query_time:.2f} 秒")
+
+                    # 存储到历史记录
+                    store_query_in_history(question, result.get("answer", ""), "agent")
+
+                else:
+                    st.error(f"❌ Agent 分析失败: {result.get('error', '未知错误')}")
+            else:
+                st.error(f"❌ 请求失败: HTTP {response.status_code}")
+
+        except requests.exceptions.ConnectionError:
+            st.error("❌ 无法连接到后端服务器,请确保后端正在运行")
+        except requests.exceptions.Timeout:
+            st.error("❌ 请求超时,Agent 分析时间过长")
+        except Exception as e:
+            logger.error(f"Agent query error: {str(e)}")
+            st.error(f"❌ Agent 分析错误: {str(e)}")
+
+
+def generate_full_report(company_filter, year_filter):
+    """
+    生成完整的年报分析报告
+    """
+    import requests
+
+    logger.info("📊 Starting full report generation")
+
+    # 获取公司名称和年份
+    company_name = company_filter if company_filter != "所有公司" else "示例公司"
+    year = year_filter if year_filter else "2023"
+
+    # 显示加载状态
+    with st.spinner(f"📊 正在生成 {company_name} {year}年 的完整年报分析...这可能需要 2-5 分钟..."):
+        try:
+            # 调用 Agent API
+            backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+            response = requests.post(
+                f"{backend_url}/agent/generate-report",
+                json={
+                    "company_name": company_name,
+                    "year": year,
+                    "save_to_file": True
+                },
+                timeout=600  # 10分钟超时
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+
+                if result.get("status") == "success":
+                    # 显示成功消息
+                    st.success(f"✅ 报告生成成功!")
+
+                    # 显示报告
+                    st.markdown("""
+                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 1.5rem; border-radius: 12px; color: white; margin: 2rem 0;">
+                        <h3 style="margin: 0 0 1rem 0;">📊 完整年报分析报告</h3>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    # 使用 Markdown 渲染报告
+                    st.markdown(result.get("report", "无报告内容"))
+
+                    # 显示生成时间
+                    gen_time = result.get("generation_time", 0)
+                    st.caption(f"⏱️ 生成耗时: {gen_time:.2f} 秒")
+
+                    # 提供下载按钮
+                    if result.get("saved_to"):
+                        st.info(f"📁 报告已保存到: {result.get('saved_to')}")
+
+                    # 提供下载
+                    st.download_button(
+                        label="💾 下载报告",
+                        data=result.get("report", ""),
+                        file_name=f"{company_name}_{year}_年报分析.md",
+                        mime="text/markdown"
+                    )
+
+                else:
+                    st.error(f"❌ 报告生成失败: {result.get('error', '未知错误')}")
+            else:
+                st.error(f"❌ 请求失败: HTTP {response.status_code}")
+
+        except requests.exceptions.ConnectionError:
+            st.error("❌ 无法连接到后端服务器,请确保后端正在运行")
+        except requests.exceptions.Timeout:
+            st.error("❌ 请求超时,报告生成时间过长,请稍后重试")
+        except Exception as e:
+            logger.error(f"Report generation error: {str(e)}")
+            st.error(f"❌ 报告生成错误: {str(e)}")
         st.success("Query history cleared!")
         st.rerun()
 

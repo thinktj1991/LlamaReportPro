@@ -1,0 +1,231 @@
+# {{ company_name }} {{ report_year }}年年报业绩点评
+
+**报告生成日期**: {{ generation_date }}
+
+---
+
+## 一、财务点评
+
+### (一) 财务图表
+
+{% for chart in financial_review.charts.charts %}
+- {{ chart }}
+{% endfor %}
+
+### (二) 业绩速览
+
+**{{ financial_review.performance_summary.company_name }} {{ financial_review.performance_summary.report_year }}年年报 财务要点:**
+
+#### 年初累计数据:
+
+**利润表指标:**
+
+- **收入**: {{ financial_review.performance_summary.financial_metrics.revenue.value }},同比{{ financial_review.performance_summary.financial_metrics.revenue.change_direction }} {{ financial_review.performance_summary.financial_metrics.revenue.change_rate }}
+- **毛利率**: {{ financial_review.performance_summary.financial_metrics.gross_margin.value }},同比{{ financial_review.performance_summary.financial_metrics.gross_margin.change_direction }} {{ financial_review.performance_summary.financial_metrics.gross_margin.change_rate }}
+- **营业利润**: {{ financial_review.performance_summary.financial_metrics.operating_profit.value }},同比{{ financial_review.performance_summary.financial_metrics.operating_profit.change_direction }} {{ financial_review.performance_summary.financial_metrics.operating_profit.change_rate }};营业利润率为 {{ financial_review.performance_summary.financial_metrics.operating_profit.value }}
+- **净利润**: {{ financial_review.performance_summary.financial_metrics.net_profit.value }},同比{{ financial_review.performance_summary.financial_metrics.net_profit.change_direction }} {{ financial_review.performance_summary.financial_metrics.net_profit.change_rate }};净利润率为 {{ financial_review.performance_summary.financial_metrics.net_profit.value }}
+{% if financial_review.performance_summary.financial_metrics.non_recurring_net_profit %}
+- **扣除非经常性损益后的净利润**: {{ financial_review.performance_summary.financial_metrics.non_recurring_net_profit.value }},同比{{ financial_review.performance_summary.financial_metrics.non_recurring_net_profit.change_direction }} {{ financial_review.performance_summary.financial_metrics.non_recurring_net_profit.change_rate }}
+{% endif %}
+- **归母净利润**: {{ financial_review.performance_summary.financial_metrics.parent_net_profit.value }},同比{{ financial_review.performance_summary.financial_metrics.parent_net_profit.change_direction }} {{ financial_review.performance_summary.financial_metrics.parent_net_profit.change_rate }}
+- **摊薄每股收益**: {{ financial_review.performance_summary.financial_metrics.eps.value }}
+
+{% if financial_review.performance_summary.financial_metrics.operating_cash_flow %}
+**现金流量指标:**
+
+- **经营活动现金流量净额**: {{ financial_review.performance_summary.financial_metrics.operating_cash_flow.value }}
+{% if financial_review.performance_summary.financial_metrics.investing_cash_flow %}
+- **投资活动现金流量净额**: {{ financial_review.performance_summary.financial_metrics.investing_cash_flow.value }}
+{% endif %}
+{% if financial_review.performance_summary.financial_metrics.financing_cash_flow %}
+- **筹资活动现金流量净额**: {{ financial_review.performance_summary.financial_metrics.financing_cash_flow.value }}
+{% endif %}
+{% endif %}
+
+{% if financial_review.performance_summary.financial_metrics.total_assets %}
+**资产负债指标:**
+
+- **总资产**: {{ financial_review.performance_summary.financial_metrics.total_assets.value }}
+- **总负债**: {{ financial_review.performance_summary.financial_metrics.total_liabilities.value }}
+- **资产负债率**: {{ financial_review.performance_summary.financial_metrics.asset_liability_ratio.value }}
+{% endif %}
+
+{% if financial_review.performance_summary.segment_data_by_product %}
+**分部财务数据:**
+
+**按产品:**
+
+{% for segment in financial_review.performance_summary.segment_data_by_product %}
+- **{{ segment.segment_name }}收入**: {{ segment.revenue }}{% if segment.change_rate %},同比{{ segment.change_rate }}{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if financial_review.performance_summary.segment_data_by_region %}
+**按地区:**
+
+{% for segment in financial_review.performance_summary.segment_data_by_region %}
+- **{{ segment.segment_name }}收入**: {{ segment.revenue }}{% if segment.change_rate %},同比{{ segment.change_rate }}{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if financial_review.performance_summary.business_data %}
+**业务数据:**
+
+{% for business in financial_review.performance_summary.business_data %}
+**{{ business.item_name }}:**
+{% for key, value in business.metrics.items() %}
+- {{ key }}: {{ value }}
+{% endfor %}
+{% endfor %}
+{% endif %}
+
+**总结**: {{ financial_review.performance_summary.summary }}
+
+### (三) 业绩和预期的比较
+
+{{ financial_review.performance_comparison.summary }}
+
+**对比表格:**
+
+| 项目 | 实际值 | 预告值 | 比较 |
+|------|--------|--------|------|
+{% for row in financial_review.performance_comparison.comparison_table %}
+| {{ row.项目 }} | {{ row.实际值 }} | {{ row.预告值 }} | {{ row.比较 }} |
+{% endfor %}
+
+### (四) 财务指标变动归因
+
+{% for attribution in financial_review.metrics_attribution %}
+#### {{ loop.index }}. {{ attribution.metric_name }}
+
+**变动情况**: {{ attribution.change_description }}
+
+**变动原因**: {{ attribution.change_reasons }}
+
+{% endfor %}
+
+---
+
+## 二、业绩指引
+
+**{{ business_guidance.guidance_period }}业绩预告**
+
+**整体业绩指引:**
+
+- **业绩预告期间**: {{ business_guidance.guidance_period }}
+- **预计的经营业绩**: {{ business_guidance.expected_performance }}
+{% if business_guidance.parent_net_profit_range %}
+- **归属于上市公司股东的净利润**: {{ business_guidance.parent_net_profit_range }}{% if business_guidance.parent_net_profit_growth_range %},比上年同期 {{ business_guidance.parent_net_profit_growth_range }}{% endif %}
+{% endif %}
+{% if business_guidance.non_recurring_profit_range %}
+- **扣除非经常性损益后的净利润**: {{ business_guidance.non_recurring_profit_range }}
+{% endif %}
+{% if business_guidance.eps_range %}
+- **基本每股收益**: {{ business_guidance.eps_range }}
+{% endif %}
+{% if business_guidance.revenue_range %}
+- **营业收入**: {{ business_guidance.revenue_range }}
+{% endif %}
+
+{% if business_guidance.business_specific_guidance %}
+**各业务的具体指引:**
+
+{% for guidance in business_guidance.business_specific_guidance %}
+- {{ guidance }}
+{% endfor %}
+{% endif %}
+
+{% if business_guidance.risk_warnings %}
+**风险提示及其他相关说明:**
+
+{% for warning in business_guidance.risk_warnings %}
+- {{ warning }}
+{% endfor %}
+{% endif %}
+
+---
+
+## 三、业务亮点
+
+{% for highlight in business_highlights.highlights %}
+### {{ highlight.business_type }}
+
+{{ highlight.highlights }}
+
+{% if highlight.achievements %}
+**主要成就:**
+
+{% for achievement in highlight.achievements %}
+- {{ achievement }}
+{% endfor %}
+{% endif %}
+
+{% endfor %}
+
+**总结**: {{ business_highlights.overall_summary }}
+
+---
+
+## 四、盈利预测和估值
+
+### (一) 盈利预测
+
+**市场整体观点:**
+
+市场整体对{{ company_name }}的投资评级为"{{ profit_forecast_and_valuation.consensus_forecast.market_rating }}"{% if profit_forecast_and_valuation.consensus_forecast.target_price %},一致目标价为 {{ profit_forecast_and_valuation.consensus_forecast.target_price }}{% endif %}{% if profit_forecast_and_valuation.consensus_forecast.upside_potential %},预计有 {{ profit_forecast_and_valuation.consensus_forecast.upside_potential }}的上涨空间{% endif %}。
+
+**一致预测:**
+
+市场对{{ company_name }}未来的关键财务指标预测如下:
+
+- **营业总收入**: {% for year, value in profit_forecast_and_valuation.consensus_forecast.revenue_forecast.items() %}{{ year }}年 {{ value }}{% if not loop.last %}, {% endif %}{% endfor %}
+- **营业收入增长率**: {% for year, value in profit_forecast_and_valuation.consensus_forecast.revenue_growth_forecast.items() %}{{ year }}年 {{ value }}{% if not loop.last %}, {% endif %}{% endfor %}
+- **归母净利润**: {% for year, value in profit_forecast_and_valuation.consensus_forecast.parent_profit_forecast.items() %}{{ year }}年 {{ value }}{% if not loop.last %}, {% endif %}{% endfor %}
+- **EPS(稀释)**: {% for year, value in profit_forecast_and_valuation.consensus_forecast.eps_forecast.items() %}{{ year }}年 {{ value }}{% if not loop.last %}, {% endif %}{% endfor %}
+- **ROE(摊薄)**: {% for year, value in profit_forecast_and_valuation.consensus_forecast.roe_forecast.items() %}{{ year }}年 {{ value }}{% if not loop.last %}, {% endif %}{% endfor %}
+- **ROA**: {% for year, value in profit_forecast_and_valuation.consensus_forecast.roa_forecast.items() %}{{ year }}年 {{ value }}{% if not loop.last %}, {% endif %}{% endfor %}
+
+{% if profit_forecast_and_valuation.consensus_changes %}
+**一致预期变化:**
+
+{{ profit_forecast_and_valuation.consensus_changes }}
+{% endif %}
+
+{% if profit_forecast_and_valuation.institutional_forecasts %}
+**具体机构预测:**
+
+{{ profit_forecast_and_valuation.institutional_forecasts }}
+{% endif %}
+
+### (二) 估值分析
+
+**估值方法**: {{ profit_forecast_and_valuation.valuation_analysis.valuation_method }}
+
+{% if profit_forecast_and_valuation.valuation_analysis.current_valuation %}
+**当前估值**: {{ profit_forecast_and_valuation.valuation_analysis.current_valuation }}
+{% endif %}
+
+{% if profit_forecast_and_valuation.valuation_analysis.valuation_comparison %}
+**估值对比**: {{ profit_forecast_and_valuation.valuation_analysis.valuation_comparison }}
+{% endif %}
+
+---
+
+## 五、总结
+
+{{ overall_summary }}
+
+---
+
+{% if references %}
+## 参考来源
+
+{% for reference in references %}
+[{{ loop.index }}] {{ reference }}
+{% endfor %}
+{% endif %}
+
+---
+
+*本报告由 AI 年报分析系统自动生成*
+

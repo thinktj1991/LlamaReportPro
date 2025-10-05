@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 from api.upload import router as upload_router
 from api.process import router as process_router
 from api.query import router as query_router
+from api.agent import router as agent_router
 from config import settings
 
 # 配置日志
@@ -96,6 +97,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(upload_router)
 app.include_router(process_router)
 app.include_router(query_router)
+app.include_router(agent_router)
 
 @app.get("/")
 async def root():

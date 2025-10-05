@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LlamaReport Backend - 文档分析系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -212,14 +213,75 @@
             .grid {
                 grid-template-columns: 1fr;
             }
-            
+
             .header h1 {
                 font-size: 2em;
             }
-            
+
             .main-content {
                 padding: 20px;
             }
+        }
+
+        /* Markdown 样式 */
+        #queryResult h1, #queryResult h2, #queryResult h3, #queryResult h4 {
+            color: #333;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+
+        #queryResult h2 {
+            border-bottom: 2px solid #4facfe;
+            padding-bottom: 8px;
+        }
+
+        #queryResult h3 {
+            color: #667eea;
+        }
+
+        #queryResult ul, #queryResult ol {
+            margin-left: 25px;
+            margin-bottom: 15px;
+        }
+
+        #queryResult li {
+            margin: 8px 0;
+            line-height: 1.6;
+        }
+
+        #queryResult p {
+            margin-bottom: 15px;
+            color: #555;
+        }
+
+        #queryResult strong {
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        #queryResult code {
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        #queryResult pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 15px 0;
+        }
+
+        #queryResult blockquote {
+            border-left: 4px solid #4facfe;
+            padding-left: 15px;
+            margin: 15px 0;
+            color: #666;
+            font-style: italic;
         }
     </style>
 </head>
@@ -275,10 +337,11 @@
             <div class="section">
                 <h2>🤖 智能问答</h2>
                 <div class="query-area">
-                    <textarea id="queryInput" class="query-input" rows="3" 
+                    <textarea id="queryInput" class="query-input" rows="3"
                               placeholder="请输入您的问题，例如：公司的营业收入是多少？"></textarea>
-                    <div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 15px;">
                         <button class="btn" onclick="askQuestion()">🔍 提问</button>
+                        <button class="btn" onclick="askQuestionWithAgent()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">🤖 Agent 智能分析</button>
                         <button class="btn" onclick="getSuggestions()">💡 获取建议</button>
                         <button class="btn" onclick="clearResults()">🗑️ 清空结果</button>
                     </div>
@@ -563,7 +626,69 @@
             document.getElementById('queryResult').innerHTML = '<p class="loading">请输入问题开始查询</p>';
             document.getElementById('queryInput').value = '';
         }
-        
+
+        // Agent 智能分析
+        async function askQuestionWithAgent() {
+            const question = document.getElementById('queryInput').value.trim();
+            if (!question) {
+                showMessage('error', '请输入问题');
+                return;
+            }
+
+            try {
+                const resultElement = document.getElementById('queryResult');
+                resultElement.innerHTML = '<p class="loading">🤖 Agent 正在进行深度分析...这可能需要几秒钟...</p>';
+
+                const response = await fetch('/agent/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        question: question
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.status === 'success') {
+                    // 使用 marked.js 渲染 Markdown
+                    const htmlContent = marked.parse(result.answer);
+
+                    resultElement.innerHTML = `
+                        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 12px; color: white; margin-bottom: 20px;">
+                            <h3 style="margin: 0 0 10px 0;">🤖 Agent 智能分析结果</h3>
+                            <p style="margin: 0; opacity: 0.9; font-size: 0.9em;">深度分析 • 结构化输出 • 专业解读</p>
+                        </div>
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; line-height: 1.8;">
+                            ${htmlContent}
+                        </div>
+                        <div style="margin-top: 15px; padding: 10px; background: #e8f4ff; border-radius: 5px; font-size: 0.9em; color: #666;">
+                            ⏱️ 分析耗时: ${result.query_time ? result.query_time.toFixed(2) : '0.00'} 秒
+                        </div>
+                    `;
+
+                    showMessage('success', 'Agent 分析完成!');
+                } else {
+                    resultElement.innerHTML = `
+                        <div class="error">
+                            ❌ Agent 分析失败: ${result.error || result.detail || '未知错误'}
+                        </div>
+                    `;
+                    showMessage('error', 'Agent 分析失败');
+                }
+            } catch (error) {
+                document.getElementById('queryResult').innerHTML = `
+                    <div class="error">
+                        ❌ Agent 分析错误: ${error.message}
+                        <br><br>
+                        <small>请确保后端服务正在运行，并且已经上传并处理了文档。</small>
+                    </div>
+                `;
+                showMessage('error', `Agent 分析错误: ${error.message}`);
+            }
+        }
+
         // 显示消息
         function showMessage(type, message) {
             // 创建消息元素
