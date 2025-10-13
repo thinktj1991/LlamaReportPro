@@ -1,0 +1,76 @@
+{
+  "query": "各业务板块的收入占比是多少？",
+  "answer": "\n根据年报，公司2023年各业务板块收入占比如下：\n- 主营业务A：60亿元，占比40%\n- 主营业务B：45亿元，占比30%\n- 主营业务C：30亿元，占比20%\n- 其他业务：15亿元，占比10%\n\n主营业务A仍然是公司最大的收入来源，占据了近一半的市场份额。\n",
+  "has_visualization": true,
+  "chart_config": {
+    "chart_type": "pie",
+    "traces": [
+      {
+        "name": "分布",
+        "x": [],
+        "y": [
+          60,
+          45,
+          30,
+          15
+        ],
+        "type": "pie",
+        "mode": null,
+        "marker": null,
+        "line": null,
+        "fill": null,
+        "text": [
+          "主营业务A",
+          "主营业务B",
+          "主营业务C",
+          "其他业务"
+        ],
+        "hovertemplate": "%{label}: %{value}亿元 (%{percent})<extra></extra>"
+      }
+    ],
+    "layout": {
+      "title": "各业务板块的收入占比是多少？ - 分布图",
+      "xaxis_title": "",
+      "yaxis_title": "亿元",
+      "height": 500,
+      "width": null,
+      "showlegend": true,
+      "template": "plotly_white",
+      "hovermode": "closest",
+      "annotations": null
+    },
+    "config": null
+  },
+  "simple_chart": null,
+  "insights": [
+    {
+      "insight_type": "trend",
+      "description": "整体呈现下降趋势",
+      "key_findings": [
+        "从主营业务A到其他业务，变化幅度为75.0%"
+      ],
+      "data_points": null
+    },
+    {
+      "insight_type": "comparison",
+      "description": "极值分析",
+      "key_findings": [
+        "最大值: 60 (主营业务A)",
+        "最小值: 15 (其他业务)",
+        "差值: 45"
+      ],
+      "data_points": null
+    }
+  ],
+  "recommendation": {
+    "recommended_chart_type": "pie",
+    "reason": "基于数据类型'distribution'，pie图最适合展示这类数据",
+    "data_characteristics": "数据类型: distribution, 数据点数: 4",
+    "alternative_charts": [
+      "bar",
+      "funnel"
+    ]
+  },
+  "data_source": null,
+  "confidence_score": 0.85
+}

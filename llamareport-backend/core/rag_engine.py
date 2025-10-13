@@ -129,10 +129,30 @@ class RAGEngine:
             # 从向量存储加载索引
             self.index = VectorStoreIndex.from_vector_store(vector_store)
 
-            # 创建查询引擎
+            # 创建查询引擎 - 优化配置
+            from llama_index.core.prompts import PromptTemplate
+
+            # 自定义系统提示词，强调使用表格数据
+            qa_prompt_tmpl = (
+                "你是一个专业的财务分析助手。下面是从文档中检索到的相关内容：\n\n"
+                "{context_str}\n\n"
+                "请仔细阅读上述内容，特别注意其中的表格数据。如果内容中包含Markdown格式的表格，"
+                "请务必分析表格中的具体数值。\n\n"
+                "用户问题：{query_str}\n\n"
+                "回答要求：\n"
+                "1. 必须基于检索到的具体数据回答，特别是表格中的数值\n"
+                "2. 如果找到相关数据，请引用具体数字和来源\n"
+                "3. 如果数据不足，明确说明缺少哪些信息\n"
+                "4. 对于趋势分析，需要对比不同时期的数据\n\n"
+                "请提供详细、准确的回答："
+            )
+            qa_prompt = PromptTemplate(qa_prompt_tmpl)
+
             self.query_engine = self.index.as_query_engine(
-                similarity_top_k=5,
-                response_mode="tree_summarize"
+                similarity_top_k=10,  # 增加检索数量
+                response_mode="compact",  # 使用compact模式保留更多细节
+                text_qa_template=qa_prompt,
+                verbose=True
             )
 
             logger.info(f"✅ 成功从ChromaDB加载索引，包含 {collection_count} 个向量")
@@ -211,10 +231,30 @@ class RAGEngine:
                 storage_context=storage_context
             )
             
-            # 创建查询引擎
+            # 创建查询引擎 - 优化配置
+            from llama_index.core.prompts import PromptTemplate
+
+            # 自定义系统提示词，强调使用表格数据
+            qa_prompt_tmpl = (
+                "你是一个专业的财务分析助手。下面是从文档中检索到的相关内容：\n\n"
+                "{context_str}\n\n"
+                "请仔细阅读上述内容，特别注意其中的表格数据。如果内容中包含Markdown格式的表格，"
+                "请务必分析表格中的具体数值。\n\n"
+                "用户问题：{query_str}\n\n"
+                "回答要求：\n"
+                "1. 必须基于检索到的具体数据回答，特别是表格中的数值\n"
+                "2. 如果找到相关数据，请引用具体数字和来源\n"
+                "3. 如果数据不足，明确说明缺少哪些信息\n"
+                "4. 对于趋势分析，需要对比不同时期的数据\n\n"
+                "请提供详细、准确的回答："
+            )
+            qa_prompt = PromptTemplate(qa_prompt_tmpl)
+
             self.query_engine = self.index.as_query_engine(
-                similarity_top_k=5,
-                response_mode="tree_summarize"
+                similarity_top_k=10,  # 增加检索数量
+                response_mode="compact",  # 使用compact模式保留更多细节
+                text_qa_template=qa_prompt,
+                verbose=True
             )
             
             logger.info(f"✅ 成功构建索引，包含 {len(all_documents)} 个文档")
@@ -225,37 +265,66 @@ class RAGEngine:
             return False
     
     def _table_to_text(self, table: Dict[str, Any]) -> str:
-        """将表格转换为文本表示"""
+        """将表格转换为文本表示 - 优化版本，生成更易于LLM理解的格式"""
         try:
             text_parts = []
-            
-            # 添加表格基本信息
-            text_parts.append(f"表格ID: {table['table_id']}")
-            text_parts.append(f"页码: {table['page_number']}")
-            
+
+            # 添加表格基本信息和上下文
+            text_parts.append("=" * 80)
+            text_parts.append(f"📊 表格数据 - {table['table_id']}")
+            text_parts.append(f"📄 来源页码: 第{table['page_number']}页")
+
+            # 标注表格类型
+            if table.get('is_financial'):
+                text_parts.append("💰 类型: 财务数据表格")
+
             if table.get('summary'):
-                text_parts.append(f"摘要: {table['summary']}")
-            
-            # 添加表格数据
+                text_parts.append(f"📝 表格摘要: {table['summary']}")
+
+            text_parts.append("=" * 80)
+
+            # 添加表格数据 - 使用Markdown表格格式
             if 'table_data' in table:
                 table_data = table['table_data']
-                # 转换为字符串表示
-                text_parts.append("表格内容:")
-                text_parts.append(f"列名: {', '.join(table_data['columns'])}")
+                columns = table_data['columns']
+                data_rows = table_data['data']
 
-                # 添加前几行数据
-                for i, row in enumerate(table_data['data'][:10]):  # 只显示前10行
-                    row_str = " | ".join([str(cell) for cell in row])
-                    text_parts.append(f"行{i+1}: {row_str}")
+                # 生成Markdown表格
+                text_parts.append("\n**表格内容（Markdown格式）：**\n")
 
-                if len(table_data['data']) > 10:
-                    text_parts.append(f"... (共{len(table_data['data'])}行)")
-            
+                # 表头
+                header = "| " + " | ".join([str(col) for col in columns]) + " |"
+                text_parts.append(header)
+
+                # 分隔线
+                separator = "|" + "|".join(["---" for _ in columns]) + "|"
+                text_parts.append(separator)
+
+                # 数据行 - 显示所有行或最多30行
+                max_rows = min(len(data_rows), 30)
+                for i, row in enumerate(data_rows[:max_rows]):
+                    row_str = "| " + " | ".join([str(cell) if cell else "" for cell in row]) + " |"
+                    text_parts.append(row_str)
+
+                if len(data_rows) > max_rows:
+                    text_parts.append(f"\n... (表格共有 {len(data_rows)} 行数据，以上显示前 {max_rows} 行)")
+                else:
+                    text_parts.append(f"\n(表格共有 {len(data_rows)} 行数据)")
+
+                # 添加数据统计信息
+                text_parts.append(f"\n**表格维度**: {len(data_rows)} 行 × {len(columns)} 列")
+
+                # 对于财务表格，添加特别提示
+                if table.get('is_financial'):
+                    text_parts.append("\n⚠️ **重要提示**: 这是财务数据表格，包含具体的数值信息。请仔细分析表格中的数据来回答问题。")
+
+            text_parts.append("=" * 80 + "\n")
+
             return "\n".join(text_parts)
-            
+
         except Exception as e:
             logger.error(f"表格转文本失败: {str(e)}")
-            return f"表格 {table.get('table_id', 'unknown')}"
+            return f"表格 {table.get('table_id', 'unknown')} (转换失败: {str(e)})"
     
     def query(self, question: str, context_filter: Optional[Dict] = None) -> Dict[str, Any]:
         """
@@ -314,22 +383,40 @@ class RAGEngine:
             }
     
     def _enhance_query(self, question: str, context_filter: Optional[Dict] = None) -> str:
-        """增强查询"""
-        enhanced_parts = [question]
-        
+        """增强查询 - 优化版本，确保LLM使用检索到的数据"""
+        enhanced_parts = []
+
+        # 添加明确的指令
+        enhanced_parts.append("【重要指令】请仔细阅读下面检索到的文档内容，特别是表格数据，并基于这些具体数据来回答问题。")
+        enhanced_parts.append("如果检索到的内容中包含表格，请务必分析表格中的数值数据。")
+        enhanced_parts.append("")
+
+        # 添加原始问题
+        enhanced_parts.append(f"【用户问题】{question}")
+        enhanced_parts.append("")
+
+        # 添加上下文过滤
         if context_filter:
+            enhanced_parts.append("【查询条件】")
             if 'company' in context_filter:
-                enhanced_parts.append(f"关注 {context_filter['company']} 的信息")
-            
+                enhanced_parts.append(f"- 公司: {context_filter['company']}")
+
             if 'year' in context_filter:
-                enhanced_parts.append(f"针对 {context_filter['year']} 年")
-            
+                enhanced_parts.append(f"- 年份: {context_filter['year']} 年")
+
             if 'document_type' in context_filter:
-                enhanced_parts.append(f"来自 {context_filter['document_type']} 文档")
-        
-        enhanced_parts.append("请提供具体数据并尽可能引用来源。")
-        
-        return " ".join(enhanced_parts)
+                enhanced_parts.append(f"- 文档类型: {context_filter['document_type']}")
+
+            enhanced_parts.append("")
+
+        # 添加回答要求
+        enhanced_parts.append("【回答要求】")
+        enhanced_parts.append("1. 必须使用检索到的具体数据（特别是表格中的数值）")
+        enhanced_parts.append("2. 如果数据不足，明确说明缺少哪些信息")
+        enhanced_parts.append("3. 提供数据来源（页码、表格ID等）")
+        enhanced_parts.append("4. 对于趋势分析，需要对比不同时期的数据")
+
+        return "\n".join(enhanced_parts)
     
     def _extract_sources(self, response) -> List[Dict[str, Any]]:
         """提取来源信息"""

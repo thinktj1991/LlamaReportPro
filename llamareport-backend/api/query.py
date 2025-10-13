@@ -9,6 +9,7 @@ from pydantic import BaseModel
 import logging
 
 from core.rag_engine import RAGEngine
+from agents.visualization_agent import VisualizationAgent
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +28,12 @@ def get_rag_engine():
 class QueryRequest(BaseModel):
     question: str
     context_filter: Optional[Dict[str, Any]] = None
+    enable_visualization: bool = True  # 是否启用可视化
 
 class BatchQueryRequest(BaseModel):
     questions: List[str]
     context_filter: Optional[Dict[str, Any]] = None
+    enable_visualization: bool = True  # 是否启用可视化
 
 class SimilarContentRequest(BaseModel):
     query: str
@@ -39,32 +42,32 @@ class SimilarContentRequest(BaseModel):
 @router.post("/ask")
 async def ask_question(request: QueryRequest):
     """
-    提问接口
-    
+    提问接口（支持可视化）
+
     Args:
         request: 查询请求
-        
+
     Returns:
-        查询结果
+        查询结果（可能包含可视化配置）
     """
     try:
         question = request.question.strip()
         if not question:
             raise HTTPException(status_code=400, detail="问题不能为空")
-        
+
         if len(question) > 1000:
             raise HTTPException(status_code=400, detail="问题过长，请控制在1000字符以内")
-        
+
         logger.info(f"收到查询: {question[:50]}...")
 
         # 获取RAG引擎并执行查询
         rag_engine = get_rag_engine()
         result = rag_engine.query(question, request.context_filter)
-        
+
         if result.get('error'):
             raise HTTPException(status_code=500, detail=result.get('answer', '查询失败'))
-        
-        # 格式化响应
+
+        # 基础响应
         response = {
             "question": question,
             "answer": result['answer'],
@@ -72,10 +75,31 @@ async def ask_question(request: QueryRequest):
             "context_filter": request.context_filter,
             "enhanced_query": result.get('enhanced_query', question)
         }
-        
+
+        # 如果启用可视化，尝试生成图表
+        if request.enable_visualization:
+            try:
+                viz_agent = VisualizationAgent()
+                viz_result = await viz_agent.generate_visualization(
+                    query=question,
+                    answer=result['answer'],
+                    sources=result.get('sources', [])
+                )
+
+                # 添加可视化数据到响应
+                response['visualization'] = viz_result.model_dump()
+                logger.info(f"✅ 可视化生成成功: {viz_result.has_visualization}")
+
+            except Exception as viz_error:
+                logger.warning(f"可视化生成失败: {str(viz_error)}")
+                response['visualization'] = {
+                    "has_visualization": False,
+                    "error": str(viz_error)
+                }
+
         logger.info(f"查询完成: {question[:50]}...")
         return JSONResponse(status_code=200, content=response)
-        
+
     except HTTPException:
         raise
     except Exception as e:

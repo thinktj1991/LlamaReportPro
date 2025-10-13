@@ -1,0 +1,83 @@
+{
+  "query": "公司净利润增长情况如何？",
+  "answer": "\n公司近三年净利润持续增长：\n- 2021年：10亿元\n- 2022年：12亿元，同比增长20%\n- 2023年：15亿元，同比增长25%\n\n净利润增速与营业收入增速保持一致，显示出良好的盈利能力。\n",
+  "has_visualization": true,
+  "chart_config": {
+    "chart_type": "line",
+    "traces": [
+      {
+        "name": "趋势",
+        "x": [
+          "2021年",
+          "2022年",
+          "2023年"
+        ],
+        "y": [
+          10,
+          12,
+          15
+        ],
+        "type": "scatter",
+        "mode": "lines+markers",
+        "marker": {
+          "size": 8
+        },
+        "line": {
+          "color": "rgb(55, 128, 191)",
+          "width": 3
+        },
+        "fill": null,
+        "text": [
+          "10亿元",
+          "12亿元",
+          "15亿元"
+        ],
+        "hovertemplate": "%{x}: %{y}亿元<extra></extra>"
+      }
+    ],
+    "layout": {
+      "title": "公司净利润增长情况如何？ - 趋势图",
+      "xaxis_title": "",
+      "yaxis_title": "亿元",
+      "height": 500,
+      "width": null,
+      "showlegend": true,
+      "template": "plotly_white",
+      "hovermode": "closest",
+      "annotations": null
+    },
+    "config": null
+  },
+  "simple_chart": null,
+  "insights": [
+    {
+      "insight_type": "trend",
+      "description": "整体呈现上升趋势",
+      "key_findings": [
+        "从2021年到2023年，变化幅度为50.0%"
+      ],
+      "data_points": null
+    },
+    {
+      "insight_type": "comparison",
+      "description": "极值分析",
+      "key_findings": [
+        "最大值: 15 (2023年)",
+        "最小值: 10 (2021年)",
+        "差值: 5"
+      ],
+      "data_points": null
+    }
+  ],
+  "recommendation": {
+    "recommended_chart_type": "line",
+    "reason": "基于数据类型'time_series'，line图最适合展示这类数据",
+    "data_characteristics": "数据类型: time_series, 数据点数: 3",
+    "alternative_charts": [
+      "area",
+      "multi_line"
+    ]
+  },
+  "data_source": null,
+  "confidence_score": 0.85
+}

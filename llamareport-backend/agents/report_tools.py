@@ -23,6 +23,7 @@ from models.report_models import (
     ConsensusForecas,
     ValuationAnalysis
 )
+from agents.visualization_agent import generate_visualization_for_query
 
 logger = logging.getLogger(__name__)
 

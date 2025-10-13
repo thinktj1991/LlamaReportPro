@@ -142,6 +142,51 @@
             align-items: center;
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
+
+        .file-item-content {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex: 1;
+        }
+
+        .file-item-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .delete-btn {
+            background: #ff4757;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .delete-btn:hover {
+            background: #ee5a6f;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(255, 71, 87, 0.3);
+        }
+
+        .batch-actions {
+            margin: 15px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .checkbox {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
         
         .query-area {
             background: white;
@@ -311,6 +356,17 @@
                         <p style="margin-top: 15px; color: #666;">支持PDF格式，最大50MB</p>
                     </div>
                     
+                    <div class="batch-actions" id="batchActions" style="display: none;">
+                        <input type="checkbox" id="selectAll" class="checkbox" onchange="toggleSelectAll()">
+                        <label for="selectAll">全选</label>
+                        <button class="btn" onclick="processSelectedFiles()" style="margin-left: auto;">
+                            批量处理选中文件
+                        </button>
+                        <button class="delete-btn" onclick="deleteSelectedFiles()">
+                            删除选中文件
+                        </button>
+                    </div>
+
                     <div class="file-list" id="fileList">
                         <!-- 文件列表将在这里显示 -->
                     </div>
@@ -451,24 +507,34 @@
             try {
                 const response = await fetch('/upload/list');
                 const data = await response.json();
-                
+
                 const fileListElement = document.getElementById('fileList');
                 const fileSelectElement = document.getElementById('fileSelect');
-                
+                const batchActionsElement = document.getElementById('batchActions');
+
                 fileListElement.innerHTML = '';
                 fileSelectElement.innerHTML = '<option value="">选择要处理的文件</option>';
-                
+
                 if (data.files && data.files.length > 0) {
+                    // 显示批量操作按钮
+                    batchActionsElement.style.display = 'flex';
+
                     data.files.forEach(file => {
-                        // 添加到文件列表显示
+                        // 添加到文件列表显示（带复选框和删除按钮）
                         const fileItem = document.createElement('div');
                         fileItem.className = 'file-item';
                         fileItem.innerHTML = `
-                            <span>${file.filename}</span>
-                            <span>${(file.file_size / 1024 / 1024).toFixed(2)} MB</span>
+                            <div class="file-item-content">
+                                <input type="checkbox" class="checkbox file-checkbox" value="${file.filename}">
+                                <span style="flex: 1;">${file.filename}</span>
+                                <span style="color: #666;">${(file.file_size / 1024 / 1024).toFixed(2)} MB</span>
+                            </div>
+                            <div class="file-item-actions">
+                                <button class="delete-btn" onclick="deleteFile('${file.filename}')">删除</button>
+                            </div>
                         `;
                         fileListElement.appendChild(fileItem);
-                        
+
                         // 添加到选择下拉框
                         const option = document.createElement('option');
                         option.value = file.filename;
@@ -477,9 +543,150 @@
                     });
                 } else {
                     fileListElement.innerHTML = '<p style="text-align: center; color: #666;">暂无上传的文件</p>';
+                    batchActionsElement.style.display = 'none';
                 }
             } catch (error) {
                 console.error('加载文件列表失败:', error);
+            }
+        }
+
+        // 删除单个文件
+        async function deleteFile(filename) {
+            if (!confirm(`确定要删除文件 "${filename}" 吗？`)) {
+                return;
+            }
+
+            try {
+                showMessage('loading', `正在删除 ${filename}...`);
+                const response = await fetch(`/upload/file/${encodeURIComponent(filename)}`, {
+                    method: 'DELETE'
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showMessage('success', `文件 ${filename} 删除成功`);
+                    loadFileList();
+                } else {
+                    showMessage('error', `删除失败: ${result.detail}`);
+                }
+            } catch (error) {
+                showMessage('error', `删除失败: ${error.message}`);
+            }
+        }
+
+        // 全选/取消全选
+        function toggleSelectAll() {
+            const selectAllCheckbox = document.getElementById('selectAll');
+            const fileCheckboxes = document.querySelectorAll('.file-checkbox');
+
+            fileCheckboxes.forEach(checkbox => {
+                checkbox.checked = selectAllCheckbox.checked;
+            });
+        }
+
+        // 获取选中的文件
+        function getSelectedFiles() {
+            const checkboxes = document.querySelectorAll('.file-checkbox:checked');
+            return Array.from(checkboxes).map(cb => cb.value);
+        }
+
+        // 批量处理选中的文件
+        async function processSelectedFiles() {
+            const selectedFiles = getSelectedFiles();
+
+            if (selectedFiles.length === 0) {
+                showMessage('error', '请先选择要处理的文件');
+                return;
+            }
+
+            if (!confirm(`确定要处理选中的 ${selectedFiles.length} 个文件吗？`)) {
+                return;
+            }
+
+            try {
+                showMessage('loading', `正在处理 ${selectedFiles.length} 个文件...`);
+
+                const response = await fetch('/process/files', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        filenames: selectedFiles,
+                        build_index: true
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showMessage('success', result.message);
+
+                    // 显示处理结果
+                    const resultDiv = document.getElementById('processResult');
+                    resultDiv.innerHTML = `
+                        <h3>批量处理结果</h3>
+                        <p><strong>总文件数:</strong> ${result.total_files}</p>
+                        <p><strong>成功:</strong> ${result.success_count}</p>
+                        <p><strong>失败:</strong> ${result.error_count}</p>
+                        <p><strong>总表格数:</strong> ${result.overall_summary.total_tables}</p>
+                        <p><strong>财务表格:</strong> ${result.overall_summary.financial_tables}</p>
+                        <p><strong>索引状态:</strong> ${result.overall_summary.index_built ? '已构建' : '未构建'}</p>
+                        <details>
+                            <summary>详细结果</summary>
+                            <pre>${JSON.stringify(result.file_results, null, 2)}</pre>
+                        </details>
+                    `;
+                    resultDiv.style.display = 'block';
+                } else {
+                    showMessage('error', `批量处理失败: ${result.detail}`);
+                }
+            } catch (error) {
+                showMessage('error', `批量处理失败: ${error.message}`);
+            }
+        }
+
+        // 批量删除选中的文件
+        async function deleteSelectedFiles() {
+            const selectedFiles = getSelectedFiles();
+
+            if (selectedFiles.length === 0) {
+                showMessage('error', '请先选择要删除的文件');
+                return;
+            }
+
+            if (!confirm(`确定要删除选中的 ${selectedFiles.length} 个文件吗？此操作不可恢复！`)) {
+                return;
+            }
+
+            try {
+                showMessage('loading', `正在删除 ${selectedFiles.length} 个文件...`);
+
+                let successCount = 0;
+                let errorCount = 0;
+
+                for (const filename of selectedFiles) {
+                    try {
+                        const response = await fetch(`/upload/file/${encodeURIComponent(filename)}`, {
+                            method: 'DELETE'
+                        });
+
+                        if (response.ok) {
+                            successCount++;
+                        } else {
+                            errorCount++;
+                        }
+                    } catch (error) {
+                        errorCount++;
+                    }
+                }
+
+                showMessage('success', `删除完成: ${successCount} 成功, ${errorCount} 失败`);
+                loadFileList();
+
+            } catch (error) {
+                showMessage('error', `批量删除失败: ${error.message}`);
             }
         }
         

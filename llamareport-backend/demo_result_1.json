@@ -1,0 +1,83 @@
+{
+  "query": "公司2021-2023年的营业收入趋势如何？",
+  "answer": "\n根据年报数据，公司近三年营业收入呈现稳定增长趋势：\n- 2021年：100亿元\n- 2022年：120亿元，同比增长20%\n- 2023年：150亿元，同比增长25%\n\n整体来看，公司营业收入保持了良好的增长势头，增速逐年加快。\n",
+  "has_visualization": true,
+  "chart_config": {
+    "chart_type": "line",
+    "traces": [
+      {
+        "name": "趋势",
+        "x": [
+          "2021",
+          "2022",
+          "2023"
+        ],
+        "y": [
+          100,
+          120,
+          150
+        ],
+        "type": "scatter",
+        "mode": "lines+markers",
+        "marker": {
+          "size": 8
+        },
+        "line": {
+          "color": "rgb(55, 128, 191)",
+          "width": 3
+        },
+        "fill": null,
+        "text": [
+          "100亿元",
+          "120亿元",
+          "150亿元"
+        ],
+        "hovertemplate": "%{x}: %{y}亿元<extra></extra>"
+      }
+    ],
+    "layout": {
+      "title": "公司2021-2023年的营业收入趋势如何？ - 趋势图",
+      "xaxis_title": "",
+      "yaxis_title": "亿元",
+      "height": 500,
+      "width": null,
+      "showlegend": true,
+      "template": "plotly_white",
+      "hovermode": "closest",
+      "annotations": null
+    },
+    "config": null
+  },
+  "simple_chart": null,
+  "insights": [
+    {
+      "insight_type": "trend",
+      "description": "整体呈现上升趋势",
+      "key_findings": [
+        "从2021到2023，变化幅度为50.0%"
+      ],
+      "data_points": null
+    },
+    {
+      "insight_type": "comparison",
+      "description": "极值分析",
+      "key_findings": [
+        "最大值: 150 (2023)",
+        "最小值: 100 (2021)",
+        "差值: 50"
+      ],
+      "data_points": null
+    }
+  ],
+  "recommendation": {
+    "recommended_chart_type": "line",
+    "reason": "基于数据类型'time_series'，line图最适合展示这类数据",
+    "data_characteristics": "数据类型: time_series, 数据点数: 3",
+    "alternative_charts": [
+      "area",
+      "multi_line"
+    ]
+  },
+  "data_source": null,
+  "confidence_score": 0.85
+}

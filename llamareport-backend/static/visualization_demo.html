@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能可视化问答系统 - LlamaReport</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .query-section {
+            margin-bottom: 30px;
+        }
+
+        .query-input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .query-input {
+            flex: 1;
+            padding: 15px;
+            font-size: 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            transition: border-color 0.3s;
+        }
+
+        .query-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .query-button {
+            padding: 15px 40px;
+            font-size: 16px;
+            font-weight: bold;
+            color: white;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .query-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .query-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .examples {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .example-btn {
+            padding: 8px 16px;
+            font-size: 14px;
+            background: #f0f0f0;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .example-btn:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .result-section {
+            display: none;
+            margin-top: 30px;
+        }
+
+        .result-section.show {
+            display: block;
+        }
+
+        .answer-box {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+
+        .answer-box h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .answer-text {
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .chart-container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .insights-box {
+            background: #fff3cd;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 4px solid #ffc107;
+        }
+
+        .insights-box h3 {
+            color: #856404;
+            margin-bottom: 15px;
+        }
+
+        .insight-item {
+            margin-bottom: 15px;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+        }
+
+        .insight-type {
+            display: inline-block;
+            padding: 4px 12px;
+            background: #667eea;
+            color: white;
+            border-radius: 15px;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error-box {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 4px solid #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎨 智能可视化问答系统</h1>
+            <p>基于 LlamaIndex + DeepSeek 的智能数据分析与可视化</p>
+        </div>
+
+        <div class="content">
+            <div class="query-section">
+                <div class="query-input-group">
+                    <input 
+                        type="text" 
+                        id="queryInput" 
+                        class="query-input" 
+                        placeholder="请输入您的问题，例如：公司2021-2023年的营业收入趋势如何？"
+                    >
+                    <button id="queryButton" class="query-button" onclick="submitQuery()">
+                        🔍 查询
+                    </button>
+                </div>
+
+                <div class="examples">
+                    <strong>示例问题：</strong>
+                    <button class="example-btn" onclick="setExample('公司2021-2023年的营业收入趋势如何？')">
+                        营业收入趋势
+                    </button>
+                    <button class="example-btn" onclick="setExample('各业务板块的收入占比是多少？')">
+                        业务板块占比
+                    </button>
+                    <button class="example-btn" onclick="setExample('公司净利润增长情况如何？')">
+                        净利润增长
+                    </button>
+                    <button class="example-btn" onclick="setExample('资产负债率变化趋势')">
+                        资产负债率
+                    </button>
+                </div>
+            </div>
+
+            <div id="loadingSection" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>正在分析数据并生成可视化...</p>
+            </div>
+
+            <div id="resultSection" class="result-section">
+                <div class="answer-box">
+                    <h3>📝 分析结果</h3>
+                    <div id="answerText" class="answer-text"></div>
+                </div>
+
+                <div id="chartSection" style="display: none;">
+                    <div class="chart-container">
+                        <div id="chartDiv"></div>
+                    </div>
+                </div>
+
+                <div id="insightsSection" style="display: none;">
+                    <div class="insights-box">
+                        <h3>💡 数据洞察</h3>
+                        <div id="insightsContent"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="errorSection" style="display: none;">
+                <div class="error-box">
+                    <h3>❌ 错误</h3>
+                    <p id="errorText"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function setExample(text) {
+            document.getElementById('queryInput').value = text;
+        }
+
+        async function submitQuery() {
+            const query = document.getElementById('queryInput').value.trim();
+            if (!query) {
+                alert('请输入问题');
+                return;
+            }
+
+            // 显示加载状态
+            document.getElementById('loadingSection').style.display = 'block';
+            document.getElementById('resultSection').classList.remove('show');
+            document.getElementById('errorSection').style.display = 'none';
+            document.getElementById('queryButton').disabled = true;
+
+            try {
+                const response = await fetch('/query/ask', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        question: query,
+                        enable_visualization: true
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || '查询失败');
+                }
+
+                displayResults(data);
+
+            } catch (error) {
+                displayError(error.message);
+            } finally {
+                document.getElementById('loadingSection').style.display = 'none';
+                document.getElementById('queryButton').disabled = false;
+            }
+        }
+
+        function displayResults(data) {
+            // 显示文本回答
+            document.getElementById('answerText').textContent = data.answer;
+            document.getElementById('resultSection').classList.add('show');
+
+            // 显示可视化
+            const viz = data.visualization;
+            if (viz && viz.has_visualization && viz.chart_config) {
+                displayChart(viz.chart_config);
+                document.getElementById('chartSection').style.display = 'block';
+
+                // 显示洞察
+                if (viz.insights && viz.insights.length > 0) {
+                    displayInsights(viz.insights);
+                    document.getElementById('insightsSection').style.display = 'block';
+                }
+            } else {
+                document.getElementById('chartSection').style.display = 'none';
+                document.getElementById('insightsSection').style.display = 'none';
+            }
+        }
+
+        function displayChart(chartConfig) {
+            const traces = chartConfig.traces.map(trace => ({
+                x: trace.x,
+                y: trace.y,
+                type: trace.type || 'scatter',
+                mode: trace.mode,
+                name: trace.name,
+                marker: trace.marker,
+                line: trace.line,
+                text: trace.text,
+                textposition: trace.textposition,
+                hovertemplate: trace.hovertemplate
+            }));
+
+            const layout = {
+                title: chartConfig.layout.title,
+                xaxis: { title: chartConfig.layout.xaxis_title },
+                yaxis: { title: chartConfig.layout.yaxis_title },
+                height: chartConfig.layout.height || 500,
+                template: chartConfig.layout.template || 'plotly_white',
+                hovermode: chartConfig.layout.hovermode || 'closest'
+            };
+
+            Plotly.newPlot('chartDiv', traces, layout, {responsive: true});
+        }
+
+        function displayInsights(insights) {
+            const container = document.getElementById('insightsContent');
+            container.innerHTML = '';
+
+            insights.forEach(insight => {
+                const item = document.createElement('div');
+                item.className = 'insight-item';
+                
+                const typeLabel = document.createElement('span');
+                typeLabel.className = 'insight-type';
+                typeLabel.textContent = insight.insight_type;
+                
+                const description = document.createElement('p');
+                description.innerHTML = `<strong>${insight.description}</strong>`;
+                
+                const findings = document.createElement('ul');
+                insight.key_findings.forEach(finding => {
+                    const li = document.createElement('li');
+                    li.textContent = finding;
+                    findings.appendChild(li);
+                });
+                
+                item.appendChild(typeLabel);
+                item.appendChild(description);
+                item.appendChild(findings);
+                container.appendChild(item);
+            });
+        }
+
+        function displayError(message) {
+            document.getElementById('errorText').textContent = message;
+            document.getElementById('errorSection').style.display = 'block';
+        }
+
+        // 支持回车键提交
+        document.getElementById('queryInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                submitQuery();
+            }
+        });
+    </script>
+</body>
+</html>
+

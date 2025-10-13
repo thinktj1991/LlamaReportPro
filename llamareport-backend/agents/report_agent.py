@@ -18,6 +18,7 @@ from agents.report_tools import (
     retrieve_financial_data,
     retrieve_business_data
 )
+from agents.visualization_agent import generate_visualization_for_query
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,19 @@ class ReportAgent:
                     "需要参数: company_name(公司名称), year(年份), business_type(业务类型)。"
                 )
             )
-            
+
+            # 可视化生成工具
+            visualization_tool = FunctionTool.from_defaults(
+                fn=generate_visualization_for_query,
+                name="generate_visualization",
+                description=(
+                    "为查询和回答生成可视化图表。"
+                    "需要参数: query(用户查询), answer(文本回答)。"
+                    "可选参数: data(原始数据), sources(数据来源)。"
+                    "返回包含图表配置的可视化响应。"
+                )
+            )
+
             # 4. 组装所有工具
             tools = [
                 query_tool,
@@ -122,7 +135,8 @@ class ReportAgent:
                 business_highlights_tool,
                 profit_forecast_tool,
                 financial_data_tool,
-                business_data_tool
+                business_data_tool,
+                visualization_tool  # 添加可视化工具
             ]
             
             # 5. 创建 FunctionAgent
@@ -133,6 +147,7 @@ class ReportAgent:
 1. 理解用户的年报分析需求
 2. 使用提供的工具检索和分析年报数据
 3. 按照标准模板生成完整的年报分析报告
+4. 在适当的时候生成可视化图表以增强洞察
 
 报告结构包括五个部分:
 一、财务点评 (使用 generate_financial_review 工具)
@@ -144,13 +159,22 @@ class ReportAgent:
 工作流程:
 1. 首先使用 annual_report_query 工具了解年报的基本信息(公司名称、年份等)
 2. 依次调用各章节生成工具
-3. 最后综合所有章节生成总结
+3. 对于包含数值数据的回答，使用 generate_visualization 工具生成图表
+4. 最后综合所有章节生成总结
+
+可视化使用指南:
+- 当回答包含趋势数据时，生成折线图或面积图
+- 当回答包含对比数据时，生成柱状图
+- 当回答包含占比数据时，生成饼图
+- 财务指标对比适合使用分组柱状图
+- 时间序列数据适合使用折线图
 
 注意事项:
 - 确保所有数据来源于年报原文
 - 保持分析的客观性和专业性
 - 使用结构化的格式输出
 - 如果某些数据缺失,明确说明
+- 适时使用可视化增强数据表达
 """
             
             self.agent = FunctionAgent(

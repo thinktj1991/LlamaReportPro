@@ -1,0 +1,75 @@
+{
+  "query": "主要财务指标的对比情况",
+  "answer": "\n2023年主要财务指标如下：\n- 营业收入：150亿元\n- 净利润：15亿元\n- 总资产：200亿元\n- 净资产：100亿元\n- 经营现金流：20亿元\n\n各项指标均保持健康水平。\n",
+  "has_visualization": true,
+  "chart_config": {
+    "chart_type": "gauge",
+    "traces": [
+      {
+        "name": "数据",
+        "x": [
+          "营业收入",
+          "净利润",
+          "总资产",
+          "净资产",
+          "经营现金流"
+        ],
+        "y": [
+          150,
+          15,
+          200,
+          100,
+          20
+        ],
+        "type": "bar",
+        "mode": null,
+        "marker": null,
+        "line": null,
+        "fill": null,
+        "text": null,
+        "hovertemplate": null
+      }
+    ],
+    "layout": {
+      "title": "主要财务指标的对比情况",
+      "xaxis_title": "",
+      "yaxis_title": "亿元",
+      "height": 500,
+      "width": null,
+      "showlegend": true,
+      "template": "plotly_white",
+      "hovermode": "closest",
+      "annotations": null
+    },
+    "config": null
+  },
+  "simple_chart": null,
+  "insights": [
+    {
+      "insight_type": "trend",
+      "description": "整体呈现下降趋势",
+      "key_findings": [
+        "从营业收入到经营现金流，变化幅度为86.7%"
+      ],
+      "data_points": null
+    },
+    {
+      "insight_type": "comparison",
+      "description": "极值分析",
+      "key_findings": [
+        "最大值: 200 (总资产)",
+        "最小值: 15 (净利润)",
+        "差值: 185"
+      ],
+      "data_points": null
+    }
+  ],
+  "recommendation": {
+    "recommended_chart_type": "gauge",
+    "reason": "基于数据类型'single_value'，gauge图最适合展示这类数据",
+    "data_characteristics": "数据类型: single_value, 数据点数: 5",
+    "alternative_charts": []
+  },
+  "data_source": null,
+  "confidence_score": 0.85
+}
