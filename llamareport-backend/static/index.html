@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LlamaReport Backend - 文档分析系统</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Plotly.js for visualization -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -327,6 +329,150 @@
             margin: 15px 0;
             color: #666;
             font-style: italic;
+        }
+
+        /* 可视化相关样式 */
+        .chart-container {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            margin: 25px 0;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            border: 1px solid #e0e0e0;
+        }
+
+        .chart-container h3 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.3em;
+            border-bottom: 2px solid #4facfe;
+            padding-bottom: 10px;
+        }
+
+        #chartDiv {
+            min-height: 400px;
+            width: 100%;
+        }
+
+        .insights-box {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 25px;
+            border-radius: 12px;
+            margin: 25px 0;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+
+        .insights-box h3 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.3em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .insight-item {
+            background: white;
+            margin: 15px 0;
+            padding: 20px;
+            border-left: 5px solid #4facfe;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .insight-item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .insight-item h4 {
+            color: #667eea;
+            margin-bottom: 12px;
+            font-size: 1.1em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .insight-item ul {
+            margin-left: 20px;
+            color: #555;
+        }
+
+        .insight-item li {
+            margin: 8px 0;
+            line-height: 1.6;
+        }
+
+        .recommendation-box {
+            background: #fff9e6;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 5px solid #ffc107;
+        }
+
+        .recommendation-box h4 {
+            color: #f57c00;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .answer-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+
+        .answer-section h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+
+        .sources-section {
+            margin-top: 25px;
+        }
+
+        .sources-section h4 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.1em;
+        }
+
+        .source-item {
+            background: white;
+            margin: 10px 0;
+            padding: 15px;
+            border-left: 3px solid #4facfe;
+            border-radius: 5px;
+            font-size: 0.95em;
+            color: #666;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .viz-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-size: 0.85em;
+            margin-left: 10px;
+            font-weight: 500;
+        }
+
+        .no-viz-message {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            color: #1976d2;
+            margin: 15px 0;
+            border-left: 4px solid #2196f3;
         }
     </style>
 </head>
@@ -753,53 +899,227 @@
             }
         }
         
-        // 提问
+        // 提问（支持可视化）
         async function askQuestion() {
             const question = document.getElementById('queryInput').value.trim();
             if (!question) {
                 showMessage('error', '请输入问题');
                 return;
             }
-            
+
             try {
                 const resultElement = document.getElementById('queryResult');
-                resultElement.innerHTML = '<p class="loading">🤔 正在思考中...</p>';
-                
+                resultElement.innerHTML = '<p class="loading">🤔 正在分析数据并生成可视化...</p>';
+
+                // 调用API，启用可视化
                 const response = await fetch('/query/ask', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        question: question
+                        question: question,
+                        enable_visualization: true  // ✅ 启用可视化
                     })
                 });
-                
+
                 const result = await response.json();
-                
+
                 if (response.ok) {
-                    resultElement.innerHTML = `
-                        <h3>🤖 回答</h3>
-                        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0;">
-                            ${result.answer}
-                        </div>
-                        ${result.sources && result.sources.length > 0 ? `
-                            <h4>📚 参考来源</h4>
-                            <div style="font-size: 0.9em; color: #666;">
-                                ${result.sources.map(source => `
-                                    <div style="margin: 5px 0; padding: 8px; background: #fff; border-left: 3px solid #4facfe;">
-                                        ${source.text.substring(0, 100)}...
-                                    </div>
-                                `).join('')}
-                            </div>
-                        ` : ''}
-                    `;
+                    // 显示结果
+                    displayQueryResults(result);
                 } else {
                     resultElement.innerHTML = `<div class="error">❌ ${result.detail}</div>`;
                 }
             } catch (error) {
                 document.getElementById('queryResult').innerHTML = `<div class="error">❌ 查询失败: ${error.message}</div>`;
             }
+        }
+
+        // 显示查询结果（包含可视化）
+        function displayQueryResults(result) {
+            const resultElement = document.getElementById('queryResult');
+
+            // 构建HTML
+            let html = '';
+
+            // 1. 文本回答
+            html += `
+                <div class="answer-section">
+                    <h3>🤖 回答</h3>
+                    <div style="line-height: 1.8; color: #333;">
+                        ${result.answer}
+                    </div>
+                </div>
+            `;
+
+            // 2. 可视化部分
+            if (result.visualization && result.visualization.has_visualization) {
+                const viz = result.visualization;
+
+                // 图表容器
+                html += `
+                    <div class="chart-container">
+                        <h3>📊 数据可视化 <span class="viz-badge">智能生成</span></h3>
+                        <div id="chartDiv"></div>
+                    </div>
+                `;
+
+                // 洞察部分
+                if (viz.insights && viz.insights.length > 0) {
+                    html += `
+                        <div class="insights-box">
+                            <h3>💡 数据洞察</h3>
+                            ${viz.insights.map(insight => `
+                                <div class="insight-item">
+                                    <h4>${getInsightIcon(insight.insight_type)} ${insight.description}</h4>
+                                    <ul>
+                                        ${insight.key_findings.map(finding => `
+                                            <li>${finding}</li>
+                                        `).join('')}
+                                    </ul>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+
+                // 图表推荐说明
+                if (viz.recommendation) {
+                    html += `
+                        <div class="recommendation-box">
+                            <h4>📈 图表推荐</h4>
+                            <p><strong>推荐图表类型:</strong> ${getChartTypeName(viz.recommendation.recommended_chart_type)}</p>
+                            <p><strong>推荐理由:</strong> ${viz.recommendation.reason}</p>
+                            <p><strong>置信度:</strong> ${(viz.confidence_score * 100).toFixed(0)}%</p>
+                        </div>
+                    `;
+                }
+            } else {
+                // 没有可视化数据
+                html += `
+                    <div class="no-viz-message">
+                        ℹ️ 此问题不包含可视化数据。尝试询问包含数值、趋势、对比等关键词的问题以获得图表展示。
+                    </div>
+                `;
+            }
+
+            // 3. 参考来源
+            if (result.sources && result.sources.length > 0) {
+                html += `
+                    <div class="sources-section">
+                        <h4>📚 参考来源</h4>
+                        ${result.sources.map(source => `
+                            <div class="source-item">
+                                ${source.text.substring(0, 150)}...
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            // 设置HTML
+            resultElement.innerHTML = html;
+
+            // 渲染图表（如果有）
+            if (result.visualization && result.visualization.has_visualization && result.visualization.chart_config) {
+                setTimeout(() => {
+                    renderChart(result.visualization.chart_config);
+                }, 100);
+            }
+        }
+
+        // 渲染Plotly图表
+        function renderChart(chartConfig) {
+            try {
+                const traces = chartConfig.traces.map(trace => {
+                    const plotlyTrace = {
+                        x: trace.x || [],
+                        y: trace.y || [],
+                        type: trace.type || 'scatter',
+                        name: trace.name || '数据',
+                    };
+
+                    // 添加可选属性
+                    if (trace.mode) plotlyTrace.mode = trace.mode;
+                    if (trace.marker) plotlyTrace.marker = trace.marker;
+                    if (trace.line) plotlyTrace.line = trace.line;
+                    if (trace.text) plotlyTrace.text = trace.text;
+                    if (trace.textposition) plotlyTrace.textposition = trace.textposition;
+                    if (trace.hovertemplate) plotlyTrace.hovertemplate = trace.hovertemplate;
+
+                    return plotlyTrace;
+                });
+
+                const layout = {
+                    title: {
+                        text: chartConfig.layout.title || '',
+                        font: { size: 18, color: '#333' }
+                    },
+                    xaxis: {
+                        title: chartConfig.layout.xaxis_title || '',
+                        gridcolor: '#e0e0e0'
+                    },
+                    yaxis: {
+                        title: chartConfig.layout.yaxis_title || '',
+                        gridcolor: '#e0e0e0'
+                    },
+                    height: chartConfig.layout.height || 500,
+                    template: chartConfig.layout.template || 'plotly_white',
+                    hovermode: chartConfig.layout.hovermode || 'closest',
+                    showlegend: chartConfig.layout.showlegend !== false,
+                    margin: { t: 60, r: 40, b: 60, l: 60 },
+                    paper_bgcolor: 'rgba(0,0,0,0)',
+                    plot_bgcolor: 'rgba(0,0,0,0)'
+                };
+
+                const config = {
+                    responsive: true,
+                    displayModeBar: true,
+                    displaylogo: false,
+                    modeBarButtonsToRemove: ['lasso2d', 'select2d']
+                };
+
+                Plotly.newPlot('chartDiv', traces, layout, config);
+            } catch (error) {
+                console.error('渲染图表失败:', error);
+                document.getElementById('chartDiv').innerHTML = `
+                    <div class="error">图表渲染失败: ${error.message}</div>
+                `;
+            }
+        }
+
+        // 获取洞察类型图标
+        function getInsightIcon(type) {
+            const icons = {
+                'trend': '📈',
+                'comparison': '⚖️',
+                'distribution': '📊',
+                'correlation': '🔗',
+                'anomaly': '⚠️'
+            };
+            return icons[type] || '💡';
+        }
+
+        // 获取图表类型名称
+        function getChartTypeName(type) {
+            const names = {
+                'bar': '柱状图',
+                'line': '折线图',
+                'pie': '饼图',
+                'scatter': '散点图',
+                'area': '面积图',
+                'multi_line': '多折线图',
+                'grouped_bar': '分组柱状图',
+                'stacked_bar': '堆叠柱状图',
+                'heatmap': '热力图',
+                'box': '箱线图',
+                'waterfall': '瀑布图',
+                'funnel': '漏斗图',
+                'gauge': '仪表盘',
+                'table': '表格'
+            };
+            return names[type] || type;
         }
         
         // 获取问题建议

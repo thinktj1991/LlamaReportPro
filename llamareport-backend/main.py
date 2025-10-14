@@ -102,7 +102,16 @@ app.include_router(agent_router)
 @app.get("/")
 async def root():
     """根路径 - 返回前端页面"""
-    return FileResponse("static/index.html")
+    try:
+        index_path = Path("static/index.html")
+        if not index_path.exists():
+            logger.error(f"index.html 文件不存在: {index_path.absolute()}")
+            raise HTTPException(status_code=404, detail="index.html 文件不存在")
+        logger.info(f"返回 index.html: {index_path.absolute()}")
+        return FileResponse(str(index_path))
+    except Exception as e:
+        logger.error(f"返回 index.html 失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"返回页面失败: {str(e)}")
 
 @app.get("/api")
 async def api_info():
