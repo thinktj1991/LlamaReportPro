@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agent 系统演示</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -187,7 +188,63 @@
             border-radius: 3px;
             font-family: 'Courier New', monospace;
         }
-        
+
+        .chart-container {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .chart-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        #chartDiv {
+            width: 100%;
+            min-height: 400px;
+        }
+
+        .insights-container {
+            background: #f0f7ff;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .insights-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .insight-item {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-left: 4px solid #667eea;
+        }
+
+        .insight-item h4 {
+            color: #333;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .insight-item p {
+            color: #666;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
         .error {
             background: #fee;
             border-left: 4px solid #f44;
@@ -237,8 +294,17 @@
                 <p id="progress-message">正在处理...</p>
                 <p class="hint">请耐心等待...</p>
             </div>
-            
+
             <div id="result" class="result"></div>
+
+            <!-- 可视化图表容器 -->
+            <div id="visualizationContainer" style="display: none;">
+                <div class="chart-container">
+                    <div class="chart-title">📊 数据可视化</div>
+                    <div id="chartDiv"></div>
+                </div>
+                <div id="insightsContainer"></div>
+            </div>
         </div>
     </div>
     
@@ -266,9 +332,16 @@
                 const result = await response.json();
                 hideProgress();
                 disableButtons(false);
-                
+
                 if (result.status === 'success') {
                     renderMarkdown(result.answer);
+
+                    // 如果有可视化数据，显示图表
+                    if (result.visualization) {
+                        displayVisualization(result.visualization);
+                    } else {
+                        hideVisualization();
+                    }
                 } else {
                     showError(result.error || '查询失败');
                 }
@@ -317,7 +390,95 @@
             const html = marked.parse(markdown);
             document.getElementById('result').innerHTML = html;
         }
-        
+
+        // 显示可视化
+        function displayVisualization(vizData) {
+            const container = document.getElementById('visualizationContainer');
+            const chartDiv = document.getElementById('chartDiv');
+            const insightsContainer = document.getElementById('insightsContainer');
+
+            // 显示容器
+            container.style.display = 'block';
+
+            // 渲染图表
+            if (vizData.has_visualization && vizData.chart_config) {
+                displayChart(vizData.chart_config);
+            }
+
+            // 渲染洞察
+            if (vizData.insights && vizData.insights.length > 0) {
+                displayInsights(vizData.insights);
+            } else {
+                insightsContainer.innerHTML = '';
+            }
+        }
+
+        // 渲染图表
+        function displayChart(chartConfig) {
+            const chartDiv = document.getElementById('chartDiv');
+
+            // 转换 traces
+            const traces = chartConfig.traces.map(trace => ({
+                x: trace.x,
+                y: trace.y,
+                type: trace.type,
+                mode: trace.mode,
+                name: trace.name,
+                marker: trace.marker,
+                line: trace.line,
+                fill: trace.fill,
+                fillcolor: trace.fillcolor,
+                hovertemplate: trace.hovertemplate
+            }));
+
+            // 转换 layout
+            const layout = {
+                title: chartConfig.layout.title,
+                xaxis: chartConfig.layout.xaxis,
+                yaxis: chartConfig.layout.yaxis,
+                hovermode: chartConfig.layout.hovermode || 'closest',
+                showlegend: chartConfig.layout.showlegend !== false,
+                legend: chartConfig.layout.legend || { orientation: 'h', y: -0.2 },
+                margin: chartConfig.layout.margin || { l: 50, r: 50, t: 80, b: 50 },
+                plot_bgcolor: '#f8f9fa',
+                paper_bgcolor: 'white'
+            };
+
+            // 配置选项
+            const config = {
+                responsive: true,
+                displayModeBar: true,
+                displaylogo: false,
+                modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d']
+            };
+
+            // 渲染图表
+            Plotly.newPlot(chartDiv, traces, layout, config);
+        }
+
+        // 渲染洞察
+        function displayInsights(insights) {
+            const container = document.getElementById('insightsContainer');
+
+            let html = '<div class="insights-container">';
+            html += '<div class="insights-title">💡 数据洞察</div>';
+
+            insights.forEach(insight => {
+                html += '<div class="insight-item">';
+                html += `<h4>${insight.title}</h4>`;
+                html += `<p>${insight.description}</p>`;
+                html += '</div>';
+            });
+
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        // 隐藏可视化
+        function hideVisualization() {
+            document.getElementById('visualizationContainer').style.display = 'none';
+        }
+
         // 显示进度
         function showProgress(message) {
             const progressDiv = document.getElementById('progress');
@@ -371,6 +532,7 @@
         function handleClear() {
             document.getElementById('result').innerHTML = '';
             document.getElementById('question').value = '';
+            hideVisualization();
         }
     </script>
 </body>

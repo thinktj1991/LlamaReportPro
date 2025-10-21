@@ -104,7 +104,7 @@ settings = Config()
 # 在导入时验证配置（仅警告，不抛出异常）
 try:
     Config.validate()
-    print("✅ 配置验证通过")
+    print("[OK] Config validation passed")
 except ValueError as e:
-    print(f"⚠️ 配置验证警告: {e}")
+    print(f"[WARNING] Config validation warning: {e}")
     # 不抛出异常，允许应用继续运行

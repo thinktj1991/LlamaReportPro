@@ -291,25 +291,87 @@ class ReportAgent:
     async def query(self, question: str) -> Dict[str, Any]:
         """
         通用查询接口
-        
+
         Args:
             question: 用户问题
-        
+
         Returns:
-            查询结果
+            查询结果（包含可视化数据）
         """
         try:
-            response = await self.agent.run(question)
-            
-            return {
+            logger.info(f"[Agent Query] Starting query: {question[:100]}...")
+
+            # 导入必要的事件类型
+            from llama_index.core.agent.workflow import (
+                ToolCallResult,
+                ToolCall,
+                AgentStream
+            )
+            logger.info("[Agent Query] Successfully imported event types")
+
+            # 运行 Agent 并捕获事件
+            handler = self.agent.run(question)
+            logger.info("[Agent Query] Got handler, starting event stream")
+
+            # 收集工具调用结果
+            visualization_data = None
+            tool_results = []
+
+            # 流式处理事件以捕获工具调用结果
+            try:
+                async for event in handler.stream_events():
+                    logger.info(f"[Agent Query] Got event: {type(event).__name__}")
+
+                    if isinstance(event, ToolCall):
+                        logger.info(f"[Agent Query] Tool call: {event.tool_name} with {event.tool_kwargs}")
+
+                    elif isinstance(event, ToolCallResult):
+                        logger.info(f"[Agent Query] Tool call result: {event.tool_name}")
+                        tool_results.append({
+                            "tool_name": event.tool_name,
+                            "tool_kwargs": event.tool_kwargs,
+                            "tool_output": event.tool_output
+                        })
+
+                        # 如果是可视化工具，保存其输出
+                        if event.tool_name == "generate_visualization":
+                            logger.info("[Agent Query] Found visualization tool call")
+                            visualization_data = event.tool_output
+
+                    elif isinstance(event, AgentStream):
+                        # 流式输出（可选）
+                        pass
+
+            except Exception as stream_error:
+                logger.error(f"[Agent Query] Error during event streaming: {str(stream_error)}")
+                import traceback
+                logger.error(traceback.format_exc())
+
+            # 获取最终响应
+            logger.info("[Agent Query] Waiting for final response")
+            response = await handler
+            logger.info(f"[Agent Query] Got final response type: {type(response)}")
+
+            result = {
                 "status": "success",
                 "question": question,
                 "answer": str(response),
-                "structured_response": response.structured_response if hasattr(response, 'structured_response') else None
+                "structured_response": response.structured_response if hasattr(response, 'structured_response') else None,
+                "tool_calls": tool_results
             }
-            
+
+            # 如果有可视化数据，添加到响应中
+            if visualization_data:
+                logger.info("[Agent Query] Adding visualization data to response")
+                result["visualization"] = visualization_data
+
+            logger.info(f"[Agent Query] Query completed successfully with {len(tool_results)} tool calls")
+            return result
+
         except Exception as e:
-            logger.error(f"❌ 查询失败: {str(e)}")
+            logger.error(f"[Agent Query] Query failed: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return {
                 "status": "error",
                 "error": str(e),
