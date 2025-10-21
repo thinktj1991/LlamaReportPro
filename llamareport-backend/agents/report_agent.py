@@ -19,6 +19,7 @@ from agents.report_tools import (
     retrieve_business_data
 )
 from agents.visualization_agent import generate_visualization_for_query
+from agents.dupont_tools import generate_dupont_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,19 @@ class ReportAgent:
                 )
             )
 
+            # 杜邦分析工具（新增）
+            dupont_analysis_tool = FunctionTool.from_defaults(
+                fn=partial(generate_dupont_analysis, query_engine=self.query_engine),
+                name="generate_dupont_analysis",
+                description=(
+                    "生成杜邦分析报告。"
+                    "杜邦分析将净资产收益率(ROE)分解为资产净利率、资产周转率和权益乘数，"
+                    "帮助深入理解公司盈利能力的驱动因素。"
+                    "需要参数: company_name(公司名称), year(年份)。"
+                    "返回包含ROE分解、各层级指标、可视化图表的结构化数据。"
+                )
+            )
+
             # 4. 组装所有工具
             tools = [
                 query_tool,
@@ -136,7 +150,8 @@ class ReportAgent:
                 profit_forecast_tool,
                 financial_data_tool,
                 business_data_tool,
-                visualization_tool  # 添加可视化工具
+                visualization_tool,  # 可视化工具
+                dupont_analysis_tool  # 杜邦分析工具（新增）
             ]
             
             # 5. 创建 FunctionAgent
@@ -148,6 +163,7 @@ class ReportAgent:
 2. 使用提供的工具检索和分析年报数据
 3. 按照标准模板生成完整的年报分析报告
 4. 在适当的时候生成可视化图表以增强洞察
+5. 当用户需要深入分析盈利能力时，使用杜邦分析工具进行ROE分解
 
 报告结构包括五个部分:
 一、财务点评 (使用 generate_financial_review 工具)

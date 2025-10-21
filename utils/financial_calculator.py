@@ -7,6 +7,14 @@ from plotly.subplots import make_subplots
 import streamlit as st
 import logging
 from datetime import datetime, timedelta
+from decimal import Decimal
+import sys
+from pathlib import Path
+
+# 添加项目根目录到Python路径
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -710,3 +718,610 @@ class FinancialCalculator:
             height=400
         )
         return fig
+
+
+# ==================== 杜邦分析计算器 ====================
+
+class DupontAnalyzer:
+    """
+    杜邦分析计算器
+    基于FinancialCalculator扩展，实现完整的杜邦分析
+    """
+
+    def __init__(self, financial_calculator: Optional[FinancialCalculator] = None):
+        """
+        初始化杜邦分析器
+
+        Args:
+            financial_calculator: 可选的FinancialCalculator实例
+        """
+        self.calculator = financial_calculator or FinancialCalculator()
+
+        # 杜邦分析指标映射
+        self.dupont_metric_mapping = {
+            'net_income': ['净利润', 'net_income', 'net_profit', '归母净利润', '归属于母公司所有者的净利润'],
+            'revenue': ['营业收入', 'revenue', 'sales', 'net_sales', '营业总收入', '总收入'],
+            'total_assets': ['总资产', 'total_assets', 'assets', '资产总计'],
+            'shareholders_equity': ['股东权益', 'equity', 'shareholders_equity', '所有者权益', '净资产', '归属于母公司所有者权益'],
+            'current_assets': ['流动资产', 'current_assets'],
+            'non_current_assets': ['非流动资产', 'non_current_assets', '长期资产', '非流动资产合计'],
+            'operating_profit': ['营业利润', 'operating_profit', 'operating_income', 'ebit'],
+            'total_liabilities': ['总负债', 'total_liabilities', 'liabilities', '负债合计']
+        }
+
+    def calculate_dupont_analysis(
+        self,
+        financial_data: Dict[str, float],
+        company_name: str,
+        report_year: str,
+        report_period: Optional[str] = None
+    ) -> 'DupontAnalysis':
+        """
+        执行完整杜邦分析
+
+        Args:
+            financial_data: 财务数据字典，键为指标名称，值为数值
+            company_name: 公司名称
+            report_year: 报告年份
+            report_period: 报告期间（可选）
+
+        Returns:
+            DupontAnalysis Pydantic模型实例
+        """
+        # 动态导入以避免循环依赖
+        try:
+            from llamareport_backend.models.dupont_models import (
+                DupontAnalysis, DupontLevel1, DupontLevel2, DupontLevel3,
+                DupontMetric, DupontTreeNode
+            )
+        except ImportError:
+            # 如果在utils目录运行，尝试相对导入
+            import sys
+            from pathlib import Path
+            backend_path = Path(__file__).parent.parent / 'llamareport-backend'
+            if str(backend_path) not in sys.path:
+                sys.path.insert(0, str(backend_path))
+            from models.dupont_models import (
+                DupontAnalysis, DupontLevel1, DupontLevel2, DupontLevel3,
+                DupontMetric, DupontTreeNode
+            )
+
+        # 标准化财务数据
+        normalized_data = self._normalize_financial_data(financial_data)
+
+        # 提取关键指标
+        net_income = normalized_data.get('net_income', 0)
+        revenue = normalized_data.get('revenue', 0)
+        total_assets = normalized_data.get('total_assets', 0)
+        shareholders_equity = normalized_data.get('shareholders_equity', 0)
+        current_assets = normalized_data.get('current_assets', 0)
+        non_current_assets = normalized_data.get('non_current_assets', 0)
+        operating_profit = normalized_data.get('operating_profit', None)
+        total_liabilities = normalized_data.get('total_liabilities', None)
+
+        # 第三层：底层数据
+        level3_net_income = self._create_metric(
+            "净利润", net_income, 3, "净利润", None, "元"
+        )
+        level3_revenue = self._create_metric(
+            "营业收入", revenue, 3, "营业收入", None, "元"
+        )
+        level3_current_assets = self._create_metric(
+            "流动资产", current_assets, 3, "流动资产", "总资产", "元"
+        )
+        level3_non_current_assets = self._create_metric(
+            "非流动资产", non_current_assets, 3, "非流动资产", "总资产", "元"
+        )
+
+        # 第二层：计算比率
+        net_profit_margin = (net_income / revenue * 100) if revenue > 0 else 0
+        asset_turnover = (revenue / total_assets) if total_assets > 0 else 0
+
+        level2_net_profit_margin = self._create_metric(
+            "营业净利润率", net_profit_margin, 2,
+            "营业净利润率 = 净利润 / 营业收入", "资产净利率", "%"
+        )
+        level2_asset_turnover = self._create_metric(
+            "资产周转率", asset_turnover, 2,
+            "资产周转率 = 营业收入 / 总资产", "资产净利率", "倍"
+        )
+        level2_total_assets = self._create_metric(
+            "总资产", total_assets, 2,
+            "总资产 = 流动资产 + 非流动资产", "权益乘数", "元"
+        )
+        level2_shareholders_equity = self._create_metric(
+            "股东权益", shareholders_equity, 2,
+            "股东权益", "权益乘数", "元"
+        )
+
+        # 第一层：ROA和权益乘数
+        roa = (net_income / total_assets * 100) if total_assets > 0 else 0
+        equity_multiplier = (total_assets / shareholders_equity) if shareholders_equity > 0 else 0
+
+        level1_roa = self._create_metric(
+            "资产净利率", roa, 1,
+            "资产净利率 = 净利润 / 总资产", "净资产收益率", "%"
+        )
+        level1_equity_multiplier = self._create_metric(
+            "权益乘数", equity_multiplier, 1,
+            "权益乘数 = 总资产 / 股东权益", "净资产收益率", "倍"
+        )
+
+        # 顶层：ROE
+        roe = (net_income / shareholders_equity * 100) if shareholders_equity > 0 else 0
+
+        level1_roe = self._create_metric(
+            "净资产收益率", roe, 1,
+            "ROE = 资产净利率 × 权益乘数", None, "%"
+        )
+
+        # 构建层级结构
+        level1 = DupontLevel1(
+            roe=level1_roe,
+            roa=level1_roa,
+            equity_multiplier=level1_equity_multiplier
+        )
+
+        level2 = DupontLevel2(
+            net_profit_margin=level2_net_profit_margin,
+            asset_turnover=level2_asset_turnover,
+            total_assets=level2_total_assets,
+            shareholders_equity=level2_shareholders_equity
+        )
+
+        level3_dict = {
+            'net_income': level3_net_income,
+            'revenue': level3_revenue,
+            'current_assets': level3_current_assets,
+            'non_current_assets': level3_non_current_assets
+        }
+
+        if operating_profit is not None:
+            level3_dict['operating_profit'] = self._create_metric(
+                "营业利润", operating_profit, 3, "营业利润", None, "元"
+            )
+
+        if total_liabilities is not None:
+            level3_dict['total_liabilities'] = self._create_metric(
+                "总负债", total_liabilities, 3, "总负债", None, "元"
+            )
+
+        level3 = DupontLevel3(**level3_dict)
+
+        # 构建树状结构
+        tree_structure = self._build_tree_structure(level1, level2, level3)
+
+        # 生成分析洞察
+        insights = self._generate_insights(level1, level2, level3)
+        strengths = self._identify_strengths(level1, level2)
+        weaknesses = self._identify_weaknesses(level1, level2)
+        recommendations = self._generate_recommendations(strengths, weaknesses)
+
+        # 创建DupontAnalysis实例
+        return DupontAnalysis(
+            company_name=company_name,
+            report_year=report_year,
+            report_period=report_period or f"{report_year}年度",
+            level1=level1,
+            level2=level2,
+            level3=level3,
+            tree_structure=tree_structure,
+            insights=insights,
+            strengths=strengths,
+            weaknesses=weaknesses,
+            recommendations=recommendations,
+            data_source="财务数据提取",
+            extraction_method="calculation",
+            confidence_score=1.0
+        )
+
+    def _normalize_financial_data(self, financial_data: Dict[str, float]) -> Dict[str, float]:
+        """
+        标准化财务数据，将各种可能的指标名称映射到标准名称
+
+        Args:
+            financial_data: 原始财务数据
+
+        Returns:
+            标准化后的财务数据
+        """
+        normalized = {}
+
+        for standard_name, possible_names in self.dupont_metric_mapping.items():
+            for key, value in financial_data.items():
+                # 检查是否匹配任何可能的名称
+                if any(name.lower() in key.lower() or key.lower() in name.lower()
+                       for name in possible_names):
+                    normalized[standard_name] = float(value)
+                    break
+
+        return normalized
+
+    def _create_metric(
+        self,
+        name: str,
+        value: float,
+        level: int,
+        formula: str,
+        parent: Optional[str] = None,
+        unit: str = "%"
+    ) -> 'DupontMetric':
+        """
+        创建单个杜邦指标
+
+        Args:
+            name: 指标名称
+            value: 指标值
+            level: 层级
+            formula: 计算公式
+            parent: 父指标名称
+            unit: 单位
+
+        Returns:
+            DupontMetric实例
+        """
+        # 使用已导入的模块
+        try:
+            from llamareport_backend.models.dupont_models import DupontMetric
+        except ImportError:
+            from models.dupont_models import DupontMetric
+
+        # 格式化显示值
+        if unit == "%":
+            formatted_value = f"{value:.2f}%"
+        elif unit == "倍":
+            formatted_value = f"{value:.2f}"
+        elif unit == "元":
+            # 转换为亿元显示
+            if abs(value) >= 1e8:
+                formatted_value = f"{value/1e8:.2f}亿元"
+            elif abs(value) >= 1e4:
+                formatted_value = f"{value/1e4:.2f}万元"
+            else:
+                formatted_value = f"{value:.2f}元"
+        else:
+            formatted_value = f"{value:.2f}"
+
+        return DupontMetric(
+            name=name,
+            value=Decimal(str(value)),
+            formatted_value=formatted_value,
+            level=level,
+            formula=formula,
+            parent_metric=parent,
+            unit=unit
+        )
+
+    def _build_tree_structure(
+        self,
+        level1: 'DupontLevel1',
+        level2: 'DupontLevel2',
+        level3: 'DupontLevel3'
+    ) -> 'DupontTreeNode':
+        """
+        构建杜邦分析树状结构
+
+        Args:
+            level1: 第一层数据
+            level2: 第二层数据
+            level3: 第三层数据
+
+        Returns:
+            DupontTreeNode根节点
+        """
+        try:
+            from llamareport_backend.models.dupont_models import DupontTreeNode
+        except ImportError:
+            from models.dupont_models import DupontTreeNode
+
+        # 第三层节点
+        net_income_node = DupontTreeNode(
+            id="net_income",
+            name=level3.net_income.name,
+            value=level3.net_income.value,
+            formatted_value=level3.net_income.formatted_value,
+            level=3,
+            children=[],
+            formula=level3.net_income.formula
+        )
+
+        revenue_node = DupontTreeNode(
+            id="revenue",
+            name=level3.revenue.name,
+            value=level3.revenue.value,
+            formatted_value=level3.revenue.formatted_value,
+            level=3,
+            children=[],
+            formula=level3.revenue.formula
+        )
+
+        current_assets_node = DupontTreeNode(
+            id="current_assets",
+            name=level3.current_assets.name,
+            value=level3.current_assets.value,
+            formatted_value=level3.current_assets.formatted_value,
+            level=3,
+            children=[],
+            formula=level3.current_assets.formula
+        )
+
+        non_current_assets_node = DupontTreeNode(
+            id="non_current_assets",
+            name=level3.non_current_assets.name,
+            value=level3.non_current_assets.value,
+            formatted_value=level3.non_current_assets.formatted_value,
+            level=3,
+            children=[],
+            formula=level3.non_current_assets.formula
+        )
+
+        # 第二层节点
+        net_profit_margin_node = DupontTreeNode(
+            id="net_profit_margin",
+            name=level2.net_profit_margin.name,
+            value=level2.net_profit_margin.value,
+            formatted_value=level2.net_profit_margin.formatted_value,
+            level=2,
+            children=[net_income_node, revenue_node],
+            formula=level2.net_profit_margin.formula
+        )
+
+        asset_turnover_node = DupontTreeNode(
+            id="asset_turnover",
+            name=level2.asset_turnover.name,
+            value=level2.asset_turnover.value,
+            formatted_value=level2.asset_turnover.formatted_value,
+            level=2,
+            children=[revenue_node],
+            formula=level2.asset_turnover.formula
+        )
+
+        total_assets_node = DupontTreeNode(
+            id="total_assets",
+            name=level2.total_assets.name,
+            value=level2.total_assets.value,
+            formatted_value=level2.total_assets.formatted_value,
+            level=2,
+            children=[current_assets_node, non_current_assets_node],
+            formula=level2.total_assets.formula
+        )
+
+        shareholders_equity_node = DupontTreeNode(
+            id="shareholders_equity",
+            name=level2.shareholders_equity.name,
+            value=level2.shareholders_equity.value,
+            formatted_value=level2.shareholders_equity.formatted_value,
+            level=2,
+            children=[],
+            formula=level2.shareholders_equity.formula
+        )
+
+        # 第一层节点
+        roa_node = DupontTreeNode(
+            id="roa",
+            name=level1.roa.name,
+            value=level1.roa.value,
+            formatted_value=level1.roa.formatted_value,
+            level=1,
+            children=[net_profit_margin_node, asset_turnover_node],
+            formula=level1.roa.formula
+        )
+
+        equity_multiplier_node = DupontTreeNode(
+            id="equity_multiplier",
+            name=level1.equity_multiplier.name,
+            value=level1.equity_multiplier.value,
+            formatted_value=level1.equity_multiplier.formatted_value,
+            level=1,
+            children=[total_assets_node, shareholders_equity_node],
+            formula=level1.equity_multiplier.formula
+        )
+
+        # 根节点（ROE）
+        roe_node = DupontTreeNode(
+            id="roe",
+            name=level1.roe.name,
+            value=level1.roe.value,
+            formatted_value=level1.roe.formatted_value,
+            level=1,
+            children=[roa_node, equity_multiplier_node],
+            formula=level1.roe.formula
+        )
+
+        return roe_node
+
+    def _generate_insights(
+        self,
+        level1: 'DupontLevel1',
+        level2: 'DupontLevel2',
+        level3: 'DupontLevel3'
+    ) -> List[str]:
+        """
+        生成AI分析洞察
+
+        Args:
+            level1: 第一层数据
+            level2: 第二层数据
+            level3: 第三层数据
+
+        Returns:
+            洞察列表
+        """
+        insights = []
+
+        roe_value = float(level1.roe.value)
+        roa_value = float(level1.roa.value)
+        equity_multiplier_value = float(level1.equity_multiplier.value)
+        net_profit_margin_value = float(level2.net_profit_margin.value)
+        asset_turnover_value = float(level2.asset_turnover.value)
+
+        # ROE水平分析
+        if roe_value > 15:
+            insights.append(f"净资产收益率为{level1.roe.formatted_value}，处于优秀水平，表明公司盈利能力强")
+        elif roe_value > 10:
+            insights.append(f"净资产收益率为{level1.roe.formatted_value}，处于良好水平")
+        elif roe_value > 5:
+            insights.append(f"净资产收益率为{level1.roe.formatted_value}，处于一般水平，有提升空间")
+        else:
+            insights.append(f"净资产收益率为{level1.roe.formatted_value}，偏低，需要关注盈利能力")
+
+        # ROE驱动因素分析
+        if roa_value > equity_multiplier_value:
+            insights.append("ROE主要由资产净利率驱动，公司注重资产使用效率和盈利能力")
+        else:
+            insights.append("ROE主要由权益乘数驱动，公司采用较高的财务杠杆策略")
+
+        # 净利润率分析
+        if net_profit_margin_value > 20:
+            insights.append(f"营业净利润率达{level2.net_profit_margin.formatted_value}，盈利能力突出")
+        elif net_profit_margin_value < 5:
+            insights.append(f"营业净利润率仅{level2.net_profit_margin.formatted_value}，成本控制有待加强")
+
+        # 资产周转率分析
+        if asset_turnover_value > 1.5:
+            insights.append(f"资产周转率为{level2.asset_turnover.formatted_value}，资产使用效率高")
+        elif asset_turnover_value < 0.5:
+            insights.append(f"资产周转率为{level2.asset_turnover.formatted_value}，资产使用效率偏低")
+
+        # 财务杠杆分析
+        if equity_multiplier_value > 3:
+            insights.append(f"权益乘数为{level1.equity_multiplier.formatted_value}，财务杠杆较高，需关注财务风险")
+        elif equity_multiplier_value < 1.5:
+            insights.append(f"权益乘数为{level1.equity_multiplier.formatted_value}，财务结构稳健，杠杆使用保守")
+
+        return insights
+
+    def _identify_strengths(
+        self,
+        level1: 'DupontLevel1',
+        level2: 'DupontLevel2'
+    ) -> List[str]:
+        """
+        识别优势指标
+
+        Args:
+            level1: 第一层数据
+            level2: 第二层数据
+
+        Returns:
+            优势列表
+        """
+        strengths = []
+
+        # 行业基准（可以后续从数据库或配置文件读取）
+        benchmarks = {
+            'roe': 12.0,  # 12%
+            'roa': 8.0,   # 8%
+            'net_profit_margin': 10.0,  # 10%
+            'asset_turnover': 1.0,  # 1倍
+            'equity_multiplier': 2.0  # 2倍
+        }
+
+        roe_value = float(level1.roe.value)
+        roa_value = float(level1.roa.value)
+        equity_multiplier_value = float(level1.equity_multiplier.value)
+        net_profit_margin_value = float(level2.net_profit_margin.value)
+        asset_turnover_value = float(level2.asset_turnover.value)
+
+        if roe_value > benchmarks['roe']:
+            strengths.append(f"净资产收益率{level1.roe.formatted_value}高于行业平均水平")
+
+        if roa_value > benchmarks['roa']:
+            strengths.append(f"资产净利率{level1.roa.formatted_value}表现优异")
+
+        if net_profit_margin_value > benchmarks['net_profit_margin']:
+            strengths.append(f"营业净利润率{level2.net_profit_margin.formatted_value}高于行业水平")
+
+        if asset_turnover_value > benchmarks['asset_turnover']:
+            strengths.append(f"资产周转率{level2.asset_turnover.formatted_value}显示资产使用效率高")
+
+        return strengths
+
+    def _identify_weaknesses(
+        self,
+        level1: 'DupontLevel1',
+        level2: 'DupontLevel2'
+    ) -> List[str]:
+        """
+        识别劣势指标
+
+        Args:
+            level1: 第一层数据
+            level2: 第二层数据
+
+        Returns:
+            劣势列表
+        """
+        weaknesses = []
+
+        # 行业基准
+        benchmarks = {
+            'roe': 12.0,
+            'roa': 8.0,
+            'net_profit_margin': 10.0,
+            'asset_turnover': 1.0,
+            'equity_multiplier': 2.0
+        }
+
+        roe_value = float(level1.roe.value)
+        roa_value = float(level1.roa.value)
+        equity_multiplier_value = float(level1.equity_multiplier.value)
+        net_profit_margin_value = float(level2.net_profit_margin.value)
+        asset_turnover_value = float(level2.asset_turnover.value)
+
+        if roe_value < benchmarks['roe']:
+            weaknesses.append(f"净资产收益率{level1.roe.formatted_value}低于行业平均水平")
+
+        if roa_value < benchmarks['roa']:
+            weaknesses.append(f"资产净利率{level1.roa.formatted_value}有待提升")
+
+        if net_profit_margin_value < benchmarks['net_profit_margin']:
+            weaknesses.append(f"营业净利润率{level2.net_profit_margin.formatted_value}偏低，成本控制需加强")
+
+        if asset_turnover_value < benchmarks['asset_turnover']:
+            weaknesses.append(f"资产周转率{level2.asset_turnover.formatted_value}较低，资产使用效率有待提高")
+
+        if equity_multiplier_value > 3.0:
+            weaknesses.append(f"权益乘数{level1.equity_multiplier.formatted_value}过高，财务风险较大")
+
+        return weaknesses
+
+    def _generate_recommendations(
+        self,
+        strengths: List[str],
+        weaknesses: List[str]
+    ) -> List[str]:
+        """
+        基于优劣势生成改进建议
+
+        Args:
+            strengths: 优势列表
+            weaknesses: 劣势列表
+
+        Returns:
+            建议列表
+        """
+        recommendations = []
+
+        # 基于劣势生成建议
+        for weakness in weaknesses:
+            if "净资产收益率" in weakness:
+                recommendations.append("建议从提升资产净利率和优化资本结构两方面入手，提高ROE")
+            elif "资产净利率" in weakness:
+                recommendations.append("建议提高净利润率或加快资产周转，提升资产净利率")
+            elif "净利润率" in weakness:
+                recommendations.append("建议优化成本结构，提高产品附加值，提升净利润率")
+            elif "资产周转率" in weakness:
+                recommendations.append("建议加快存货和应收账款周转，提高资产使用效率")
+            elif "权益乘数" in weakness and "过高" in weakness:
+                recommendations.append("建议优化资本结构，适当降低财务杠杆，控制财务风险")
+
+        # 基于优势生成建议
+        if len(strengths) > 0:
+            recommendations.append("建议继续保持现有优势，巩固竞争地位")
+
+        # 通用建议
+        if len(recommendations) == 0:
+            recommendations.append("建议持续关注财务指标变化，保持稳健经营")
+
+        return recommendations
