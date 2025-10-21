@@ -26,17 +26,68 @@ logger = logging.getLogger(__name__)
 
 class ReportAgent:
     """年报分析 Agent"""
-    
+
     def __init__(self, query_engine):
         """
         初始化 Agent
-        
+
         Args:
             query_engine: LlamaIndex 查询引擎
         """
         self.query_engine = query_engine
         self.agent = None
         self._setup_agent()
+
+    def _serialize_tool_output(self, tool_output) -> Any:
+        """
+        将ToolOutput对象转换为可JSON序列化的格式
+
+        Args:
+            tool_output: ToolOutput对象或其他类型
+
+        Returns:
+            可序列化的数据（dict, str, list等）
+        """
+        try:
+            # 如果是字符串、数字、布尔值、None，直接返回
+            if isinstance(tool_output, (str, int, float, bool, type(None))):
+                return tool_output
+
+            # 如果是列表或元组，递归序列化每个元素
+            if isinstance(tool_output, (list, tuple)):
+                return [self._serialize_tool_output(item) for item in tool_output]
+
+            # 如果是字典，递归序列化每个值
+            if isinstance(tool_output, dict):
+                return {key: self._serialize_tool_output(value) for key, value in tool_output.items()}
+
+            # 如果有dict()方法（Pydantic模型等）
+            if hasattr(tool_output, 'dict'):
+                try:
+                    return tool_output.dict()
+                except Exception:
+                    pass
+
+            # 如果有model_dump()方法（Pydantic v2）
+            if hasattr(tool_output, 'model_dump'):
+                try:
+                    return tool_output.model_dump()
+                except Exception:
+                    pass
+
+            # 如果有__dict__属性
+            if hasattr(tool_output, '__dict__'):
+                try:
+                    return {k: self._serialize_tool_output(v) for k, v in tool_output.__dict__.items() if not k.startswith('_')}
+                except Exception:
+                    pass
+
+            # 最后尝试转换为字符串
+            return str(tool_output)
+
+        except Exception as e:
+            logger.warning(f"Failed to serialize tool_output: {str(e)}, converting to string")
+            return str(tool_output)
     
     def _setup_agent(self):
         """设置 Agent 和工具"""
@@ -343,16 +394,20 @@ class ReportAgent:
 
                     elif isinstance(event, ToolCallResult):
                         logger.info(f"[Agent Query] Tool call result: {event.tool_name}")
+
+                        # 将ToolOutput转换为可序列化的格式
+                        tool_output_serializable = self._serialize_tool_output(event.tool_output)
+
                         tool_results.append({
                             "tool_name": event.tool_name,
                             "tool_kwargs": event.tool_kwargs,
-                            "tool_output": event.tool_output
+                            "tool_output": tool_output_serializable
                         })
 
                         # 如果是可视化工具，保存其输出
                         if event.tool_name == "generate_visualization":
                             logger.info("[Agent Query] Found visualization tool call")
-                            visualization_data = event.tool_output
+                            visualization_data = tool_output_serializable
 
                     elif isinstance(event, AgentStream):
                         # 流式输出（可选）
