@@ -62,6 +62,39 @@ class DocumentProcessor:
                 'processing_method': 'simple_pdf_processor'
             }
             
+            # 🔍 打印处理结果的JSON结构
+            import json
+            print("=" * 80)
+            print(f"📄 文档处理完成: {filename}")
+            print("=" * 80)
+            
+            # 打印主要结构信息
+            print("📊 主要结构:")
+            print(f"  - 文件名: {result['filename']}")
+            print(f"  - 页数: {result['page_count']}")
+            print(f"  - 文档数量: {len(result['documents'])}")
+            print(f"  - 总文本长度: {result['total_text_length']}")
+            print(f"  - 处理方式: {result['processing_method']}")
+            
+            # 打印详细内容结构
+            print("\n📋 详细内容结构:")
+            print(f"  - 页面数量: {len(detailed_content['pages'])}")
+            print(f"  - 元数据: {list(detailed_content['metadata'].keys()) if detailed_content['metadata'] else '无'}")
+            
+            # 打印每页的表格信息
+            print("\n📊 表格信息:")
+            for i, page in enumerate(detailed_content['pages'][:3]):  # 只显示前3页
+                print(f"  第{i+1}页: {len(page['tables'])}个表格, {len(page['text'])}个字符")
+                if page['tables']:
+                    for j, table in enumerate(page['tables'][:2]):  # 每页最多显示2个表格
+                        print(f"    表格{j+1}: {table['rows']}行 x {table['cols']}列")
+            
+            # 打印完整的JSON结构（可选，注释掉避免输出过长）
+            # print("\n🔍 完整JSON结构:")
+            # print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+            
+            print("=" * 80)
+            
             logger.info(f"成功处理文档: {filename}, 页数: {result['page_count']}")
             return result
             
@@ -107,6 +140,20 @@ class DocumentProcessor:
                                 })
                     
                     content['pages'].append(page_content)
+            
+            # 🔍 打印详细内容提取结果
+            print(f"\n📄 详细内容提取完成:")
+            print(f"  - 总页数: {content['total_pages']}")
+            print(f"  - 提取页面数: {len(content['pages'])}")
+            print(f"  - PDF元数据: {len(content['metadata'])}个字段")
+            
+            # 统计表格总数
+            total_tables = sum(len(page['tables']) for page in content['pages'])
+            print(f"  - 总表格数: {total_tables}")
+            
+            # 显示前几页的详细信息
+            for i, page in enumerate(content['pages'][:2]):  # 只显示前2页
+                print(f"  第{i+1}页: {len(page['text'])}字符, {len(page['tables'])}表格, {page['images']}图片")
                     
         except Exception as e:
             logger.error(f"提取详细内容失败: {str(e)}")

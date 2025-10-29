@@ -15,6 +15,9 @@ from llama_index.llms.deepseek import DeepSeek
 from llama_index.embeddings.openai import OpenAIEmbedding
 import chromadb
 
+# 导入Hybrid Retriever
+from .hybrid_retriever import HybridRetriever
+
 logger = logging.getLogger(__name__)
 
 class RAGEngine:
@@ -39,6 +42,10 @@ class RAGEngine:
             self._setup_chroma()
         else:
             logger.warning("⚠️ 跳过ChromaDB初始化 - LlamaIndex未就绪")
+        
+        # 初始化Hybrid Retriever
+        self.hybrid_retriever = HybridRetriever(storage_dir=str(self.storage_dir))
+        self.use_hybrid_retriever = True  # 默认启用混合检索
     
     def _setup_llama_index(self):
         """设置LlamaIndex配置"""
@@ -180,9 +187,17 @@ class RAGEngine:
         try:
             all_documents = []
             
+            # 🔍 打印索引构建开始信息
+            print("\n" + "=" * 80)
+            print("🚀 开始构建RAG索引")
+            print("=" * 80)
+            
             # 处理文本文档
+            print("📄 处理文本文档:")
+            text_doc_count = 0
             for doc_name, doc_data in processed_documents.items():
                 if 'documents' in doc_data:
+                    print(f"  - {doc_name}: {len(doc_data['documents'])}个文档片段")
                     for doc in doc_data['documents']:
                         # 添加元数据
                         doc.metadata.update({
@@ -190,10 +205,16 @@ class RAGEngine:
                             'document_type': 'text_content'
                         })
                         all_documents.append(doc)
+                        text_doc_count += 1
+            
+            print(f"  📊 文本文档总数: {text_doc_count}")
             
             # 处理表格数据
+            table_doc_count = 0
             if extracted_tables:
+                print("\n📊 处理表格数据:")
                 for doc_name, tables in extracted_tables.items():
+                    print(f"  - {doc_name}: {len(tables)}个表格")
                     for table in tables:
                         # 将表格转换为文本
                         table_text = self._table_to_text(table)
@@ -210,15 +231,34 @@ class RAGEngine:
                             }
                         )
                         all_documents.append(table_doc)
+                        table_doc_count += 1
+                        
+                        # 打印表格转换示例（前2个）
+                        if table_doc_count <= 2:
+                            print(f"    📋 表格{table_doc_count}: {table['table_id']}")
+                            print(f"       - 财务表格: {'是' if table.get('is_financial', False) else '否'}")
+                            print(f"       - 重要性: {table.get('importance_score', 0.0):.2f}")
+                            print(f"       - 文本长度: {len(table_text)}字符")
+                
+                print(f"  📊 表格文档总数: {table_doc_count}")
+            else:
+                print("\n📊 表格数据: 无")
             
             if not all_documents:
                 logger.warning("没有文档可以索引")
                 return False
             
+            print(f"\n📈 索引统计:")
+            print(f"  - 总文档数: {len(all_documents)}")
+            print(f"  - 文本文档: {text_doc_count}")
+            print(f"  - 表格文档: {table_doc_count}")
+            
             # 创建向量存储
+            print(f"\n🔧 创建向量存储...")
             vector_store = ChromaVectorStore(chroma_collection=self.chroma_collection)
             
             # 创建存储上下文
+            print(f"🔧 创建存储上下文...")
             storage_context = StorageContext.from_defaults(
                 docstore=SimpleDocumentStore(),
                 index_store=SimpleIndexStore(),
@@ -226,12 +266,14 @@ class RAGEngine:
             )
             
             # 构建索引
+            print(f"🔧 构建向量索引...")
             self.index = VectorStoreIndex.from_documents(
                 all_documents,
                 storage_context=storage_context
             )
             
             # 创建查询引擎 - 优化配置
+            print(f"🔧 创建查询引擎...")
             from llama_index.core.prompts import PromptTemplate
 
             # 自定义系统提示词，强调使用表格数据
@@ -256,6 +298,30 @@ class RAGEngine:
                 text_qa_template=qa_prompt,
                 verbose=True
             )
+            
+            # 🔍 打印索引构建完成信息
+            print(f"\n✅ 索引构建完成!")
+            print(f"  - 文档总数: {len(all_documents)}")
+            print(f"  - 向量存储: ChromaDB")
+            print(f"  - 集合名称: {self.collection_name}")
+            print(f"  - 检索数量: 10")
+            print(f"  - 响应模式: compact")
+            print("=" * 80)
+            
+            # 构建Hybrid Retriever索引
+            if self.use_hybrid_retriever:
+                print("🚀 构建Hybrid Retriever索引...")
+                hybrid_success = self.hybrid_retriever.build_hybrid_index(
+                    processed_documents, extracted_tables
+                )
+                if hybrid_success:
+                    print("✅ Hybrid Retriever索引构建成功")
+                    hybrid_stats = self.hybrid_retriever.get_stats()
+                    print(f"  - 文本索引: {hybrid_stats['text_collection_count']}个文档")
+                    print(f"  - 表格索引: {hybrid_stats['table_collection_count']}个文档")
+                    print(f"  - 财务指标: {hybrid_stats['financial_metrics_count']}个")
+                else:
+                    print("❌ Hybrid Retriever索引构建失败")
             
             logger.info(f"✅ 成功构建索引，包含 {len(all_documents)} 个文档")
             return True
@@ -320,7 +386,21 @@ class RAGEngine:
 
             text_parts.append("=" * 80 + "\n")
 
-            return "\n".join(text_parts)
+            result_text = "\n".join(text_parts)
+            
+            # 🔍 打印表格转换信息（仅前2个表格）
+            if hasattr(self, '_table_count'):
+                self._table_count += 1
+            else:
+                self._table_count = 1
+                
+            if self._table_count <= 2:
+                print(f"    🔄 表格转换: {table['table_id']}")
+                print(f"       - 原始数据: {len(table.get('table_data', {}).get('data', []))}行")
+                print(f"       - 转换后长度: {len(result_text)}字符")
+                print(f"       - 包含Markdown: {'是' if '|' in result_text else '否'}")
+
+            return result_text
 
         except Exception as e:
             logger.error(f"表格转文本失败: {str(e)}")
@@ -338,7 +418,14 @@ class RAGEngine:
             查询结果
         """
         try:
+            # 🔍 打印查询开始信息
+            print("\n" + "=" * 80)
+            print("🔍 开始RAG查询")
+            print("=" * 80)
+            print(f"📝 原始问题: {question}")
+            
             if not self.llama_index_ready:
+                print("❌ RAG系统未就绪")
                 return {
                     'answer': "RAG系统未就绪，请检查OPENAI_API_KEY配置。",
                     'sources': [],
@@ -346,22 +433,62 @@ class RAGEngine:
                 }
 
             if not self.query_engine:
+                print("🔄 尝试加载现有索引...")
                 # 尝试从现有的ChromaDB集合加载索引
                 if not self.load_existing_index():
+                    print("❌ 无法加载现有索引")
                     return {
                         'answer': "RAG系统未初始化，请先处理文档。",
                         'sources': [],
                         'error': True
                     }
+                print("✅ 成功加载现有索引")
             
             # 增强查询
+            print("🔧 增强查询...")
             enhanced_query = self._enhance_query(question, context_filter)
+            print(f"📝 增强后查询: {enhanced_query[:200]}...")
             
             # 执行查询
-            response = self.query_engine.query(enhanced_query)
-            
-            # 提取来源信息
-            sources = self._extract_sources(response)
+            if self.use_hybrid_retriever and self.hybrid_retriever.text_index and self.hybrid_retriever.table_index:
+                print("🔍 使用Hybrid Retriever执行混合检索...")
+                # 使用Hybrid Retriever进行检索
+                hybrid_results = self.hybrid_retriever.retrieve(question, top_k=10)
+                
+                if hybrid_results:
+                    print(f"📊 Hybrid Retriever检索结果:")
+                    print(f"  - 检索到文档: {len(hybrid_results)}个")
+                    print(f"  - 平均综合评分: {sum(r['comprehensive_score'] for r in hybrid_results)/len(hybrid_results):.3f}")
+                    print(f"  - 策略: {hybrid_results[0]['strategy']}")
+                    
+                    # 构建上下文
+                    context = "\n\n".join([r['document'].text for r in hybrid_results])
+                    
+                    # 使用LLM生成回答
+                    response = self.query_engine.query(enhanced_query)
+                    
+                    # 提取来源信息
+                    sources = []
+                    for result in hybrid_results:
+                        sources.append({
+                            'text': result['document'].text[:200] + "..." if len(result['document'].text) > 200 else result['document'].text,
+                            'metadata': result['document'].metadata,
+                            'score': result['comprehensive_score'],
+                            'sim_score': result['sim_score'],
+                            'metric_score': result['metric_score'],
+                            'year_score': result['year_score']
+                        })
+                else:
+                    print("⚠️ Hybrid Retriever未找到结果，回退到传统检索")
+                    response = self.query_engine.query(enhanced_query)
+                    sources = self._extract_sources(response)
+            else:
+                print("🔍 执行传统向量检索和LLM生成...")
+                response = self.query_engine.query(enhanced_query)
+                
+                # 提取来源信息
+                print("📚 提取来源信息...")
+                sources = self._extract_sources(response)
             
             result = {
                 'answer': str(response),
@@ -371,10 +498,18 @@ class RAGEngine:
                 'enhanced_query': enhanced_query
             }
             
+            # 🔍 打印查询结果信息
+            print(f"\n✅ 查询完成!")
+            print(f"  - 检索到来源: {len(sources)}个")
+            print(f"  - 回答长度: {len(str(response))}字符")
+            print(f"  - 来源类型: {[s.get('metadata', {}).get('document_type', 'unknown') for s in sources[:3]]}")
+            print("=" * 80)
+            
             logger.info(f"✅ 查询成功: {question[:50]}...")
             return result
             
         except Exception as e:
+            print(f"❌ 查询失败: {str(e)}")
             logger.error(f"❌ 查询失败: {str(e)}")
             return {
                 'answer': f"查询失败: {str(e)}",
