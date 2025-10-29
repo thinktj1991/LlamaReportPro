@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>饼图修复测试</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4facfe;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #666;
+            margin-top: 30px;
+        }
+        .chart-box {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .status {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            opacity: 0.9;
+        }
+        pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 饼图渲染修复测试</h1>
+        <p>测试后端返回的饼图数据格式是否能正确渲染</p>
+
+        <h2>📊 测试场景</h2>
+        
+        <div class="info status">
+            <strong>问题描述：</strong><br>
+            后端生成饼图时，将labels存储在<code>trace.text</code>字段中，但Plotly饼图需要<code>labels</code>字段。<br>
+            修复后的代码会自动将<code>trace.text</code>转换为<code>labels</code>。
+        </div>
+
+        <button onclick="testOriginalFormat()">测试原始格式（修复前会失败）</button>
+        <button onclick="testFixedFormat()">测试修复后格式</button>
+        <button onclick="testBothFormats()">对比测试</button>
+
+        <div id="status"></div>
+
+        <h2>📈 测试结果</h2>
+        
+        <div class="chart-box">
+            <h3>图表1：使用后端返回的原始格式（text字段）</h3>
+            <div id="chart1"></div>
+        </div>
+
+        <div class="chart-box">
+            <h3>图表2：使用修复后的格式（labels字段）</h3>
+            <div id="chart2"></div>
+        </div>
+
+        <h2>📝 数据格式对比</h2>
+        <div id="dataComparison"></div>
+    </div>
+
+    <script>
+        // 模拟后端返回的饼图数据（原始格式）
+        const backendChartConfig = {
+            "chart_type": "pie",
+            "traces": [
+                {
+                    "name": "分布",
+                    "x": [],
+                    "y": [60, 45, 30, 15],
+                    "type": "pie",
+                    "text": ["主营业务A", "主营业务B", "主营业务C", "其他业务"],
+                    "hovertemplate": "%{label}: %{value}亿元 (%{percent})<extra></extra>"
+                }
+            ],
+            "layout": {
+                "title": "各业务板块的收入占比 - 分布图",
+                "height": 500
+            }
+        };
+
+        // 修复前的渲染函数（会失败）
+        function renderChartOld(chartConfig, divId) {
+            try {
+                const traces = chartConfig.traces.map(trace => {
+                    const plotlyTrace = {
+                        x: trace.x || [],
+                        y: trace.y || [],
+                        type: trace.type || 'scatter',
+                        name: trace.name || '数据',
+                    };
+
+                    if (trace.text) plotlyTrace.text = trace.text;
+                    if (trace.hovertemplate) plotlyTrace.hovertemplate = trace.hovertemplate;
+
+                    return plotlyTrace;
+                });
+
+                const layout = {
+                    title: chartConfig.layout.title || '',
+                    height: chartConfig.layout.height || 500
+                };
+
+                Plotly.newPlot(divId, traces, layout);
+                return true;
+            } catch (error) {
+                console.error('渲染失败:', error);
+                document.getElementById(divId).innerHTML = `<div class="error status">❌ 渲染失败: ${error.message}</div>`;
+                return false;
+            }
+        }
+
+        // 修复后的渲染函数
+        function renderChartFixed(chartConfig, divId) {
+            try {
+                const traces = chartConfig.traces.map(trace => {
+                    const plotlyTrace = {
+                        type: trace.type || 'scatter',
+                        name: trace.name || '数据',
+                    };
+
+                    // 特殊处理饼图
+                    if (trace.type === 'pie') {
+                        plotlyTrace.labels = trace.text || [];
+                        plotlyTrace.values = trace.y || [];
+                    } else {
+                        plotlyTrace.x = trace.x || [];
+                        plotlyTrace.y = trace.y || [];
+                    }
+
+                    if (trace.type !== 'pie' && trace.text) {
+                        plotlyTrace.text = trace.text;
+                    }
+                    
+                    if (trace.hovertemplate) plotlyTrace.hovertemplate = trace.hovertemplate;
+
+                    return plotlyTrace;
+                });
+
+                const layout = {
+                    title: chartConfig.layout.title || '',
+                    height: chartConfig.layout.height || 500
+                };
+
+                Plotly.newPlot(divId, traces, layout);
+                return true;
+            } catch (error) {
+                console.error('渲染失败:', error);
+                document.getElementById(divId).innerHTML = `<div class="error status">❌ 渲染失败: ${error.message}</div>`;
+                return false;
+            }
+        }
+
+        function testOriginalFormat() {
+            const status = document.getElementById('status');
+            status.innerHTML = '<div class="info status">⏳ 测试原始格式（修复前）...</div>';
+            
+            const success = renderChartOld(backendChartConfig, 'chart1');
+            
+            if (success) {
+                status.innerHTML = '<div class="error status">⚠️ 原始格式渲染成功，但可能显示不正确（labels缺失）</div>';
+            } else {
+                status.innerHTML = '<div class="error status">❌ 原始格式渲染失败（预期结果）</div>';
+            }
+        }
+
+        function testFixedFormat() {
+            const status = document.getElementById('status');
+            status.innerHTML = '<div class="info status">⏳ 测试修复后格式...</div>';
+            
+            const success = renderChartFixed(backendChartConfig, 'chart2');
+            
+            if (success) {
+                status.innerHTML = '<div class="success status">✅ 修复后格式渲染成功！饼图应该正确显示labels和values</div>';
+            } else {
+                status.innerHTML = '<div class="error status">❌ 修复后格式渲染失败（不应该发生）</div>';
+            }
+        }
+
+        function testBothFormats() {
+            const status = document.getElementById('status');
+            status.innerHTML = '<div class="info status">⏳ 对比测试中...</div>';
+            
+            const oldSuccess = renderChartOld(backendChartConfig, 'chart1');
+            const fixedSuccess = renderChartFixed(backendChartConfig, 'chart2');
+            
+            let message = '<h3>测试结果对比：</h3>';
+            message += `<p>修复前：${oldSuccess ? '⚠️ 渲染但可能不正确' : '❌ 失败'}</p>`;
+            message += `<p>修复后：${fixedSuccess ? '✅ 成功' : '❌ 失败'}</p>`;
+            
+            if (fixedSuccess) {
+                message += '<div class="success status">✅ 修复成功！图表2应该正确显示饼图</div>';
+            }
+            
+            status.innerHTML = message;
+            
+            // 显示数据格式对比
+            showDataComparison();
+        }
+
+        function showDataComparison() {
+            const comparison = document.getElementById('dataComparison');
+            
+            const originalTrace = {
+                x: [],
+                y: [60, 45, 30, 15],
+                type: 'pie',
+                text: ["主营业务A", "主营业务B", "主营业务C", "其他业务"]
+            };
+            
+            const fixedTrace = {
+                type: 'pie',
+                labels: ["主营业务A", "主营业务B", "主营业务C", "其他业务"],
+                values: [60, 45, 30, 15]
+            };
+            
+            comparison.innerHTML = `
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div>
+                        <h4>❌ 修复前（后端返回格式）</h4>
+                        <pre>${JSON.stringify(originalTrace, null, 2)}</pre>
+                        <p class="error status">问题：Plotly饼图需要<code>labels</code>字段，但数据在<code>text</code>字段中</p>
+                    </div>
+                    <div>
+                        <h4>✅ 修复后（转换后格式）</h4>
+                        <pre>${JSON.stringify(fixedTrace, null, 2)}</pre>
+                        <p class="success status">解决：将<code>text</code>转换为<code>labels</code>，<code>y</code>转换为<code>values</code></p>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 页面加载时自动运行对比测试
+        window.onload = function() {
+            testBothFormats();
+        };
+    </script>
+</body>
+</html>
+

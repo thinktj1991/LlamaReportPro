@@ -258,11 +258,16 @@ def create_plotly_chart(chart_config: Dict[str, Any]) -> go.Figure:
                 hovertemplate=trace_data.get('hovertemplate')
             )
         elif trace_type == 'pie':
+            # 饼图：labels从text字段获取，values从y字段获取
+            labels = trace_data.get('text', []) or trace_data.get('labels', [])
+            values = trace_data.get('y', []) or trace_data.get('values', [])
+
             trace = go.Pie(
-                labels=trace_data.get('text', []),
-                values=trace_data.get('y', []),
+                labels=labels,
+                values=values,
                 name=trace_data.get('name', ''),
-                hovertemplate=trace_data.get('hovertemplate')
+                hovertemplate=trace_data.get('hovertemplate'),
+                marker=trace_data.get('marker')
             )
         else:
             # 默认使用散点图

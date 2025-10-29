@@ -1033,18 +1033,34 @@
         function renderChart(chartConfig) {
             try {
                 const traces = chartConfig.traces.map(trace => {
+                    // 基础trace对象
                     const plotlyTrace = {
-                        x: trace.x || [],
-                        y: trace.y || [],
                         type: trace.type || 'scatter',
                         name: trace.name || '数据',
                     };
+
+                    // 特殊处理饼图
+                    if (trace.type === 'pie') {
+                        // 饼图需要labels和values
+                        plotlyTrace.labels = trace.text || [];
+                        plotlyTrace.values = trace.y || [];
+                        // 饼图不需要x和y
+                    } else {
+                        // 其他图表类型使用x和y
+                        plotlyTrace.x = trace.x || [];
+                        plotlyTrace.y = trace.y || [];
+                    }
 
                     // 添加可选属性
                     if (trace.mode) plotlyTrace.mode = trace.mode;
                     if (trace.marker) plotlyTrace.marker = trace.marker;
                     if (trace.line) plotlyTrace.line = trace.line;
-                    if (trace.text) plotlyTrace.text = trace.text;
+
+                    // 对于非饼图，添加text属性
+                    if (trace.type !== 'pie' && trace.text) {
+                        plotlyTrace.text = trace.text;
+                    }
+
                     if (trace.textposition) plotlyTrace.textposition = trace.textposition;
                     if (trace.hovertemplate) plotlyTrace.hovertemplate = trace.hovertemplate;
 
