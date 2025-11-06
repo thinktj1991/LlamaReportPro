@@ -184,6 +184,7 @@ def main():
     navigation_options = [
         {"name": "首页", "icon": "🏠", "desc": "系统概览和状态"},
         {"name": "上传与处理", "icon": "📁", "desc": "上传PDF文档", "badge": f"{stats['documents_count']}个文档" if stats['documents_count'] > 0 else None},
+        {"name": "实时数据", "icon": "📈", "desc": "实时股价和新闻", "badge": "NEW"},  # ⭐ 新增
         {"name": "数据分析", "icon": "📊", "desc": "数据分析和可视化", "badge": f"{stats['tables_count']}个表格" if stats['tables_count'] > 0 else None},
         {"name": "问答系统", "icon": "🤖", "desc": "AI智能问答", "badge": "就绪" if stats['rag_ready'] else "未就绪"},
         {"name": "公司对比", "icon": "🏢", "desc": "多公司对比分析", "badge": f"{stats['companies_count']}家公司" if stats['companies_count'] > 0 else None},
@@ -225,6 +226,9 @@ def main():
     elif page == "上传与处理":
         from pages.upload import show_upload_page
         show_upload_page()
+    elif page == "实时数据":  # ⭐ 新增
+        from pages.realtime_data import show_realtime_page
+        show_realtime_page()
     elif page == "数据分析":
         from pages.analysis import show_analysis_page
         show_analysis_page()

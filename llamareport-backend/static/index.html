@@ -535,12 +535,81 @@
                 </div>
             </div>
             
+            <!-- 实时数据查询区域 ⭐ NEW -->
+            <div class="section" style="background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%); border: 2px solid #ff9a76;">
+                <h2 style="color: #d84315;">📈 实时数据查询 <span class="viz-badge" style="background: #ff6f00;">NEW</span></h2>
+                <p style="color: #5d4037; margin-bottom: 20px;">✨ 查询实时股价、最新新闻、公司公告、智能预警等</p>
+                
+                <div class="query-area">
+                    <input type="text" id="stockCodeInput" class="query-input" 
+                           placeholder="输入股票代码，如：600519.SH（贵州茅台）或 000001.SZ（平安银行）"
+                           style="border: 2px solid #ff9a76;">
+                    
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 15px;">
+                        <button class="btn" onclick="queryRealtimePrice()" 
+                                style="background: linear-gradient(135deg, #ff6f00 0%, #ff9800 100%);">
+                            💰 实时股价
+                        </button>
+                        <button class="btn" onclick="queryLatestNews()" 
+                                style="background: linear-gradient(135deg, #4caf50 0%, #66bb6a 100%);">
+                            📰 最新新闻
+                        </button>
+                        <button class="btn" onclick="queryAnnouncements()" 
+                                style="background: linear-gradient(135deg, #2196f3 0%, #42a5f5 100%);">
+                            📢 公司公告
+                        </button>
+                        <button class="btn" onclick="checkAlerts()" 
+                                style="background: linear-gradient(135deg, #f44336 0%, #ef5350 100%);">
+                            ⚠️ 智能预警
+                        </button>
+                        <button class="btn" onclick="queryMarketOverview()" 
+                                style="background: linear-gradient(135deg, #9c27b0 0%, #ab47bc 100%);">
+                            📊 市场概览
+                        </button>
+                    </div>
+                    
+                    <!-- 快捷股票代码 -->
+                    <div style="margin-top: 15px; padding: 15px; background: white; border-radius: 8px;">
+                        <p style="color: #666; margin-bottom: 10px; font-size: 0.9em;">⚡ 快捷选择:</p>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <button class="btn" onclick="document.getElementById('stockCodeInput').value='600519.SH'" 
+                                    style="padding: 6px 12px; font-size: 0.9em; background: #e3f2fd; color: #1976d2;">
+                                贵州茅台
+                            </button>
+                            <button class="btn" onclick="document.getElementById('stockCodeInput').value='000858.SZ'" 
+                                    style="padding: 6px 12px; font-size: 0.9em; background: #e3f2fd; color: #1976d2;">
+                                五粮液
+                            </button>
+                            <button class="btn" onclick="document.getElementById('stockCodeInput').value='601318.SH'" 
+                                    style="padding: 6px 12px; font-size: 0.9em; background: #e3f2fd; color: #1976d2;">
+                                中国平安
+                            </button>
+                            <button class="btn" onclick="document.getElementById('stockCodeInput').value='600036.SH'" 
+                                    style="padding: 6px 12px; font-size: 0.9em; background: #e3f2fd; color: #1976d2;">
+                                招商银行
+                            </button>
+                            <button class="btn" onclick="document.getElementById('stockCodeInput').value='000002.SZ'" 
+                                    style="padding: 6px 12px; font-size: 0.9em; background: #e3f2fd; color: #1976d2;">
+                                万科A
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="realtimeResult" class="result-area" style="background: white;">
+                    <p class="loading">选择功能并输入股票代码开始查询</p>
+                </div>
+            </div>
+            
             <!-- 智能问答区域 -->
             <div class="section">
-                <h2>🤖 智能问答</h2>
+                <h2>🤖 智能问答 <span style="font-size: 0.6em; color: #666;">(支持年报分析+实时数据⭐)</span></h2>
                 <div class="query-area">
                     <textarea id="queryInput" class="query-input" rows="3"
-                              placeholder="请输入您的问题，例如：公司的营业收入是多少？"></textarea>
+                              placeholder="请输入您的问题，例如：
+• 年报分析: 公司的营业收入是多少？
+• 实时数据: 贵州茅台现在多少钱？⭐
+• 综合分析: 贵州茅台值得投资吗？⭐"></textarea>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 15px;">
                         <button class="btn" onclick="askQuestion()">🔍 提问</button>
                         <button class="btn" onclick="askQuestionWithAgent()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">🤖 Agent 智能分析</button>
@@ -549,7 +618,7 @@
                     </div>
                 </div>
                 <div id="queryResult" class="result-area">
-                    <p class="loading">请先上传并处理文档，然后提出问题</p>
+                    <p class="loading">💡 提示: Agent 现在支持实时数据查询！试试问 "XX公司现在的股价是多少？"</p>
                 </div>
             </div>
         </div>
@@ -1255,6 +1324,182 @@
                     messageDiv.parentNode.removeChild(messageDiv);
                 }
             }, 3000);
+        }
+        
+        // ==================== 实时数据功能 ⭐ NEW ====================
+        
+        // 获取股票代码
+        function getStockCode() {
+            const stockCode = document.getElementById('stockCodeInput').value.trim();
+            if (!stockCode) {
+                showMessage('error', '请输入股票代码');
+                return null;
+            }
+            return stockCode;
+        }
+        
+        // 显示实时数据结果
+        function displayRealtimeResult(data, title, icon = '📊') {
+            const resultElement = document.getElementById('realtimeResult');
+            
+            // 将换行符转换为 <br>，保留格式
+            const formattedData = data.replace(/\n/g, '<br>');
+            
+            resultElement.innerHTML = `
+                <div style="background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); padding: 20px; border-radius: 12px; margin-bottom: 15px;">
+                    <h3 style="margin: 0; color: #333;">${icon} ${title}</h3>
+                    <p style="margin: 5px 0 0 0; font-size: 0.9em; color: #666;">数据更新时间: ${new Date().toLocaleString('zh-CN')}</p>
+                </div>
+                <div style="background: white; padding: 20px; border-radius: 8px; line-height: 1.8; white-space: pre-wrap; font-family: 'Segoe UI', sans-serif;">
+                    ${formattedData}
+                </div>
+            `;
+        }
+        
+        // 1. 查询实时股价
+        async function queryRealtimePrice() {
+            const stockCode = getStockCode();
+            if (!stockCode) return;
+            
+            try {
+                const resultElement = document.getElementById('realtimeResult');
+                resultElement.innerHTML = '<p class="loading">💰 正在获取实时股价...</p>';
+                
+                const response = await fetch(`/realtime/quote/${stockCode}`);
+                const result = await response.json();
+                
+                if (response.ok && result.status === 'success') {
+                    displayRealtimeResult(result.data, '实时股价', '💰');
+                    showMessage('success', '股价查询成功');
+                } else {
+                    resultElement.innerHTML = `<div class="error">❌ 查询失败: ${result.detail || '未知错误'}</div>`;
+                    showMessage('error', '股价查询失败');
+                }
+            } catch (error) {
+                document.getElementById('realtimeResult').innerHTML = `<div class="error">❌ 查询错误: ${error.message}</div>`;
+                showMessage('error', `查询错误: ${error.message}`);
+            }
+        }
+        
+        // 2. 查询最新新闻
+        async function queryLatestNews() {
+            const stockCode = getStockCode();
+            if (!stockCode) return;
+            
+            // 尝试从股票代码提取公司名称（简化处理）
+            const companyName = prompt('请输入公司名称（如：贵州茅台、中国平安）:', '');
+            if (!companyName) return;
+            
+            try {
+                const resultElement = document.getElementById('realtimeResult');
+                resultElement.innerHTML = '<p class="loading">📰 正在获取最新新闻...</p>';
+                
+                const response = await fetch('/realtime/news', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        company_name: companyName,
+                        limit: 10
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.status === 'success') {
+                    displayRealtimeResult(result.data, `${companyName} 最新新闻`, '📰');
+                    showMessage('success', '新闻查询成功');
+                } else {
+                    resultElement.innerHTML = `<div class="error">❌ 查询失败: ${result.detail || '未知错误'}</div>`;
+                    showMessage('error', '新闻查询失败');
+                }
+            } catch (error) {
+                document.getElementById('realtimeResult').innerHTML = `<div class="error">❌ 查询错误: ${error.message}</div>`;
+                showMessage('error', `查询错误: ${error.message}`);
+            }
+        }
+        
+        // 3. 查询公司公告
+        async function queryAnnouncements() {
+            const stockCode = getStockCode();
+            if (!stockCode) return;
+            
+            try {
+                const resultElement = document.getElementById('realtimeResult');
+                resultElement.innerHTML = '<p class="loading">📢 正在获取公司公告...</p>';
+                
+                const response = await fetch('/realtime/announcements', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        stock_code: stockCode,
+                        limit: 10
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.status === 'success') {
+                    displayRealtimeResult(result.data, `${stockCode} 公司公告`, '📢');
+                    showMessage('success', '公告查询成功');
+                } else {
+                    resultElement.innerHTML = `<div class="error">❌ 查询失败: ${result.detail || '未知错误'}</div>`;
+                    showMessage('error', '公告查询失败');
+                }
+            } catch (error) {
+                document.getElementById('realtimeResult').innerHTML = `<div class="error">❌ 查询错误: ${error.message}</div>`;
+                showMessage('error', `查询错误: ${error.message}`);
+            }
+        }
+        
+        // 4. 检查智能预警
+        async function checkAlerts() {
+            const stockCode = getStockCode();
+            if (!stockCode) return;
+            
+            try {
+                const resultElement = document.getElementById('realtimeResult');
+                resultElement.innerHTML = '<p class="loading">⚠️ 正在检查智能预警...</p>';
+                
+                const response = await fetch(`/realtime/alerts/${stockCode}`);
+                const result = await response.json();
+                
+                if (response.ok && result.status === 'success') {
+                    displayRealtimeResult(result.data, `${stockCode} 智能预警`, '⚠️');
+                    showMessage('success', '预警检查完成');
+                } else {
+                    resultElement.innerHTML = `<div class="error">❌ 查询失败: ${result.detail || '未知错误'}</div>`;
+                    showMessage('error', '预警检查失败');
+                }
+            } catch (error) {
+                document.getElementById('realtimeResult').innerHTML = `<div class="error">❌ 查询错误: ${error.message}</div>`;
+                showMessage('error', `查询错误: ${error.message}`);
+            }
+        }
+        
+        // 5. 查询市场概览
+        async function queryMarketOverview() {
+            try {
+                const resultElement = document.getElementById('realtimeResult');
+                resultElement.innerHTML = '<p class="loading">📊 正在获取市场概览...</p>';
+                
+                const response = await fetch('/realtime/market/overview');
+                const result = await response.json();
+                
+                if (response.ok && result.status === 'success') {
+                    displayRealtimeResult(result.data, 'A股市场概览', '📊');
+                    showMessage('success', '市场概览查询成功');
+                } else {
+                    resultElement.innerHTML = `<div class="error">❌ 查询失败: ${result.detail || '未知错误'}</div>`;
+                    showMessage('error', '市场概览查询失败');
+                }
+            } catch (error) {
+                document.getElementById('realtimeResult').innerHTML = `<div class="error">❌ 查询错误: ${error.message}</div>`;
+                showMessage('error', `查询错误: ${error.message}`);
+            }
         }
     </script>
 </body>
