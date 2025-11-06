@@ -32,6 +32,10 @@ class Config:
     DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
     DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     
+    # 实时数据配置 ⭐ 新增
+    TUSHARE_API_TOKEN = os.getenv("TUSHARE_API_TOKEN")  # Tushare Pro API Token
+    ENABLE_REALTIME_DATA = os.getenv("ENABLE_REALTIME_DATA", "true").lower() == "true"
+    
     # 文件配置
     MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 50 * 1024 * 1024))  # 50MB
     ALLOWED_EXTENSIONS = {".pdf"}
@@ -94,6 +98,8 @@ class Config:
             "deepseek_configured": bool(cls.DEEPSEEK_API_KEY),
             "openai_configured": bool(cls.OPENAI_API_KEY),
             "llama_cloud_configured": bool(cls.LLAMA_CLOUD_API_KEY),
+            "tushare_configured": bool(cls.TUSHARE_API_TOKEN),  # ⭐ 新增
+            "realtime_data_enabled": cls.ENABLE_REALTIME_DATA,  # ⭐ 新增
             "uploads_dir": str(cls.UPLOADS_DIR),
             "storage_dir": str(cls.STORAGE_DIR)
         }

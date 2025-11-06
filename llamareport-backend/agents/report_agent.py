@@ -20,6 +20,7 @@ from agents.report_tools import (
 )
 from agents.visualization_agent import generate_visualization_for_query
 from agents.dupont_tools import generate_dupont_analysis
+from agents.realtime_tools import create_realtime_data_tools
 
 logger = logging.getLogger(__name__)
 
@@ -191,9 +192,14 @@ class ReportAgent:
                     "返回包含ROE分解、各层级指标、可视化图表的结构化数据。"
                 )
             )
+            
+            # 4. 创建实时数据工具
+            realtime_tools = create_realtime_data_tools()
+            logger.info(f"✅ 加载了 {len(realtime_tools)} 个实时数据工具")
 
-            # 4. 组装所有工具
+            # 5. 组装所有工具（历史数据 + 实时数据）
             tools = [
+                # 历史数据工具（年报分析）
                 query_tool,
                 financial_review_tool,
                 business_guidance_tool,
@@ -202,46 +208,62 @@ class ReportAgent:
                 financial_data_tool,
                 business_data_tool,
                 visualization_tool,  # 可视化工具
-                dupont_analysis_tool  # 杜邦分析工具（新增）
-            ]
+                dupont_analysis_tool,  # 杜邦分析工具
+                
+                # 实时数据工具（新增）⭐
+            ] + realtime_tools
             
-            # 5. 创建 FunctionAgent
+            # 6. 创建 FunctionAgent（更新系统提示词）
             system_prompt = """
 你是一个专业的年报分析 Agent,负责生成结构化的年报分析报告。
 
-你的任务是:
-1. 理解用户的年报分析需求
-2. 使用提供的工具检索和分析年报数据
-3. 按照标准模板生成完整的年报分析报告
-4. 在适当的时候生成可视化图表以增强洞察
-5. 当用户需要深入分析盈利能力时，使用杜邦分析工具进行ROE分解
+【核心能力】
+1. 历史数据分析: 从年报中提取和分析历史财务数据
+2. 实时数据查询: 获取最新的股价、新闻、公告等实时信息
+3. 综合分析: 结合历史和实时数据提供全面的投资分析
+4. 可视化生成: 为数据创建直观的图表
+5. 智能预警: 检测和提示异常情况
 
-报告结构包括五个部分:
+【工具使用策略】⭐ 重要
+- 历史表现分析 → 使用年报分析工具（annual_report_query, generate_*）
+- 当前状况查询 → 使用实时数据工具（get_realtime_stock_price, get_market_overview）
+- 最新动态追踪 → 使用新闻/公告工具（get_latest_financial_news, get_company_announcements）
+- 风险监控 → 使用预警工具（check_stock_alerts）
+- 综合分析 → 同时使用历史和实时工具
+
+【报告结构】（生成完整报告时使用）
 一、财务点评 (使用 generate_financial_review 工具)
 二、业绩指引 (使用 generate_business_guidance 工具)
 三、业务亮点 (使用 generate_business_highlights 工具)
 四、盈利预测和估值 (使用 generate_profit_forecast_and_valuation 工具)
 五、总结 (基于前四部分综合生成)
 
-工作流程:
-1. 首先使用 annual_report_query 工具了解年报的基本信息(公司名称、年份等)
-2. 依次调用各章节生成工具
-3. 对于包含数值数据的回答，使用 generate_visualization 工具生成图表
-4. 最后综合所有章节生成总结
+【工作流程】
+1. 判断用户需求类型（历史分析 vs 实时查询 vs 综合分析）
+2. 选择合适的工具组合
+3. 执行查询并收集数据
+4. 对于数值数据，使用 generate_visualization 生成图表
+5. 整合信息，提供清晰的分析结论
 
-可视化使用指南:
-- 当回答包含趋势数据时，生成折线图或面积图
-- 当回答包含对比数据时，生成柱状图
-- 当回答包含占比数据时，生成饼图
-- 财务指标对比适合使用分组柱状图
-- 时间序列数据适合使用折线图
+【数据时效性提示】⭐ 关键
+- 年报数据: 历史数据，可能滞后3-12个月，但更全面深入
+- 实时数据: 当前数据，实时性强，但缺少历史深度
+- 最佳实践: 结合两者使用 —— 用年报看趋势，用实时看现状
+
+【回答示例】
+用户问: "贵州茅台现在值得投资吗？"
+正确做法:
+1. 使用 get_realtime_stock_price 获取当前股价和估值
+2. 使用 annual_report_query 查询年报中的业绩和财务状况
+3. 使用 get_latest_financial_news 了解最新动态
+4. 使用 check_stock_alerts 检查异常情况
+5. 综合分析给出投资建议
 
 注意事项:
-- 确保所有数据来源于年报原文
-- 保持分析的客观性和专业性
-- 使用结构化的格式输出
-- 如果某些数据缺失,明确说明
-- 适时使用可视化增强数据表达
+- 明确区分历史数据和实时数据
+- 数据来源要清晰（来自年报 vs 来自实时行情）
+- 保持客观和专业
+- 实时数据工具可能会失败（API限制），需要优雅处理
 """
             
             self.agent = FunctionAgent(

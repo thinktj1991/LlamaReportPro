@@ -17,6 +17,7 @@ from api.upload import router as upload_router
 from api.process import router as process_router
 from api.query import router as query_router
 from api.agent import router as agent_router
+from api.realtime import router as realtime_router  # ⭐ 新增实时数据API
 from config import settings
 
 # 配置日志
@@ -98,6 +99,7 @@ app.include_router(upload_router)
 app.include_router(process_router)
 app.include_router(query_router)
 app.include_router(agent_router)
+app.include_router(realtime_router)  # ⭐ 新增实时数据路由
 
 @app.get("/")
 async def root():
@@ -132,6 +134,8 @@ async def api_info():
                 "upload": "/upload - 文件上传相关接口",
                 "process": "/process - 文档处理相关接口",
                 "query": "/query - 查询问答相关接口",
+                "agent": "/agent - Agent分析相关接口",
+                "realtime": "/realtime - 实时数据相关接口 ⭐ NEW",
                 "docs": "/docs - API文档",
                 "health": "/health - 健康检查"
             }

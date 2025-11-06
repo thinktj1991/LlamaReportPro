@@ -12,14 +12,17 @@ LlamaReport Backend 是原LlamaReportPro项目的简化版本，移除了复杂�
 - 📊 **表格数据提取** - 财务表格识别和分析
 - 🤖 **RAG智能问答** - 基于文档内容的智能问答
 - 🔍 **向量检索** - 高效的语义搜索
+- 📈 **实时数据查询** - ⭐ NEW 实时股价、新闻、公告
+- ⚠️ **智能预警** - ⭐ NEW 异常检测和风险提示
 
 ### 技术栈
 
 - **Web框架**: FastAPI
 - **文档处理**: LlamaIndex + PDFPlumber
 - **向量数据库**: ChromaDB
-- **LLM服务**: OpenAI GPT-4
+- **LLM服务**: DeepSeek + OpenAI Embedding
 - **数据处理**: Pandas
+- **实时数据**: ⭐ Tushare + 新浪财经 + 新闻聚合
 
 ## 🚀 快速开始
 
@@ -103,6 +106,29 @@ curl -X POST "http://localhost:8000/query/similar" \
   -d '{"query": "财务数据", "top_k": 5}'
 ```
 
+### 实时数据查询 ⭐ NEW
+
+```bash
+# 获取实时股价
+curl "http://localhost:8000/realtime/quote/600519.SH"
+
+# 获取最新新闻
+curl -X POST "http://localhost:8000/realtime/news" \
+  -H "Content-Type: application/json" \
+  -d '{"company_name": "贵州茅台", "limit": 5}'
+
+# 检查股票预警
+curl "http://localhost:8000/realtime/alerts/600519.SH"
+
+# 获取市场概览
+curl "http://localhost:8000/realtime/market/overview"
+
+# 通过 Agent 综合查询
+curl -X POST "http://localhost:8000/agent/query" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "贵州茅台现在值得投资吗？"}'
+```
+
 ## 🏗️ 项目结构
 
 ```
@@ -123,7 +149,22 @@ llamareport-backend/
 │   ├── __init__.py
 │   ├── upload.py        # 文件上传接口
 │   ├── process.py       # 文档处理接口
-│   └── query.py         # 查询接口
+│   ├── query.py         # 查询接口
+│   ├── agent.py         # Agent接口
+│   └── realtime.py      # ⭐ 实时数据接口
+├── agents/              # ⭐ Agent系统
+│   ├── report_agent.py  # 报告Agent
+│   ├── report_tools.py  # 报告工具
+│   ├── realtime_tools.py # ⭐ 实时数据工具
+│   └── ...
+├── data_sources/        # ⭐ 数据源适配器
+│   ├── base.py          # 基类
+│   ├── tushare_source.py # Tushare数据源
+│   ├── sina_source.py   # 新浪财经数据源
+│   └── news_source.py   # 新闻数据源
+├── models/              # ⭐ 数据模型
+│   ├── report_models.py # 报告模型
+│   └── realtime_models.py # ⭐ 实时数据模型
 ├── uploads/             # 上传文件目录
 └── storage/             # 数据存储目录
     └── chroma/          # ChromaDB数据
@@ -239,9 +280,84 @@ MIT License
 
 ---
 
-**简化版特点**:
+**核心特点**:
 - ✅ 移除了Streamlit前端
 - ✅ 专注核心功能
 - ✅ 代码量减少70%
 - ✅ 依赖减少60%
 - ✅ 启动速度提升80%
+- ✅ ⭐ NEW 实时数据集成（股价、新闻、公告）
+- ✅ ⭐ NEW 智能预警系统
+- ✅ ⭐ NEW 历史与实时数据联动分析
+
+---
+
+## ⭐ 实时数据功能 (NEW)
+
+### 功能简介
+
+实时数据功能将系统从"历史年报分析"升级为"全方位财务智能平台":
+
+- 📈 **实时股价**: 获取最新价格、涨跌幅、成交量、估值指标
+- 📰 **财经新闻**: 追踪公司最新动态和行业新闻
+- 📢 **公司公告**: 获取官方公告、业绩预告等
+- ⚠️ **智能预警**: 自动检测价格异常、成交量异常等
+- 📊 **市场概览**: 查看主要指数实时情况
+- 🔄 **综合分析**: 结合历史和实时数据的深度分析
+
+### 快速开始
+
+#### 1. 配置（可选）
+
+在 `.env` 文件中添加（可选但推荐）:
+```env
+TUSHARE_API_TOKEN=your-token-here  # 获取: https://tushare.pro/register
+ENABLE_REALTIME_DATA=true
+```
+
+**说明**: 不配置 Tushare Token 时，系统会使用免费的新浪财经数据源。
+
+#### 2. 使用示例
+
+**通过 Agent 使用（推荐）**:
+```python
+# 综合分析 - Agent 会自动调用合适的工具
+response = await agent.query("贵州茅台现在值得投资吗？")
+
+# Agent 执行流程:
+# 1. get_realtime_stock_price → 获取当前价格和估值
+# 2. annual_report_query → 查询历史业绩
+# 3. get_latest_financial_news → 了解最新动态
+# 4. check_stock_alerts → 检查风险
+# 5. 综合分析 → 给出投资建议
+```
+
+**直接使用工具**:
+```python
+from agents.realtime_tools import (
+    get_realtime_stock_price,
+    get_latest_financial_news
+)
+
+# 获取实时股价
+price_info = get_realtime_stock_price("600519.SH")
+
+# 获取最新新闻
+news = get_latest_financial_news("贵州茅台", 5)
+```
+
+### 详细文档
+
+- 📖 [实时数据使用指南](./REALTIME_DATA_GUIDE.md) - 完整配置和使用说明
+- 📚 [功能示例文档](./REALTIME_FEATURE_EXAMPLES.md) - 详细使用示例
+- 📊 [功能总结](./REALTIME_FEATURE_SUMMARY.md) - 技术实现总结
+
+### 数据源说明
+
+| 数据源 | 用途 | 成本 | 特点 |
+|--------|------|------|------|
+| **新浪财经** | 实时行情 | 免费 | 无需Token，实时性好 |
+| **Tushare** | 全面数据 | 免费/付费 | 可选，数据更全 |
+| **新闻聚合** | 新闻/公告 | 免费 | 多源聚合 |
+
+---

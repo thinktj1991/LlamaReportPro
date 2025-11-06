@@ -1,0 +1,65 @@
+# LlamaReport Backend 环境变量配置示例
+# 复制此文件为 .env 并填入实际的配置值
+
+# ==================== 必需配置 ====================
+
+# OpenAI API (用于 Embedding)
+OPENAI_API_KEY=sk-proj-your-openai-api-key-here
+
+# DeepSeek API (用于对话模型)
+DEEPSEEK_API_KEY=sk-your-deepseek-api-key-here
+DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+
+
+# ==================== 实时数据配置（可选）⭐ ====================
+
+# Tushare Pro API Token (可选，但推荐)
+# 获取方式: https://tushare.pro/register
+# 说明: 不配置此项时，系统会使用免费的新浪财经数据源
+TUSHARE_API_TOKEN=your-tushare-token-here
+
+# 是否启用实时数据功能
+# 说明: 设置为 false 可以完全禁用实时数据功能
+ENABLE_REALTIME_DATA=true
+
+
+# ==================== 服务器配置（可选）====================
+
+# 服务器地址和端口
+HOST=0.0.0.0
+PORT=8000
+
+# 调试模式
+DEBUG=false
+
+
+# ==================== 文件配置（可选）====================
+
+# 最大文件大小 (字节)
+MAX_FILE_SIZE=52428800
+
+# 文本分块配置
+CHUNK_SIZE=1024
+CHUNK_OVERLAP=200
+
+# 相似度检索配置
+SIMILARITY_TOP_K=5
+
+
+# ==================== 配置说明 ====================
+
+# 1. 必需配置
+#    - OPENAI_API_KEY: 用于文本向量化（Embedding）
+#    - DEEPSEEK_API_KEY: 用于对话生成（LLM）
+#
+# 2. 实时数据配置
+#    - TUSHARE_API_TOKEN: 可选但推荐
+#      * 不配置: 使用新浪财经（免费，实时性好，但数据有限）
+#      * 配置: 使用 Tushare（更全面，支持历史数据和财务指标）
+#
+# 3. 获取 API Key
+#    - OpenAI: https://platform.openai.com/api-keys
+#    - DeepSeek: https://platform.deepseek.com/api_keys
+#    - Tushare: https://tushare.pro/register
+

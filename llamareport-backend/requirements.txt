@@ -32,6 +32,12 @@ python-dotenv>=1.0.0
 pydantic>=2.11.0
 jinja2>=3.1.0
 
+# 实时数据源（新增）⭐
+tushare>=1.2.89  # Tushare Pro API
+requests>=2.31.0  # HTTP 请求库
+beautifulsoup4>=4.12.0  # 网页解析
+lxml>=4.9.0  # XML/HTML 解析
+
 # 开发和测试（可选）
 pytest>=7.0.0
 httpx>=0.24.0  # 用于测试API
