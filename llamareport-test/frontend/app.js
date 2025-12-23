@@ -1123,8 +1123,7 @@
         <div class="app-container">
             <header class="app-header">
                 <div class="header-content">
-                    <h1 class="app-title">🚀 LlamaReport Backend</h1>
-                    <p class="app-subtitle">智能文档分析与问答系统</p>
+                    <h1 class="app-title">🚀 FinDecipher</h1>
                 </div>
                 <div class="header-status">
                     <span class="status-text">{{ systemStatus }}</span>
