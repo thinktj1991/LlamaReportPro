@@ -28,616 +28,22 @@
         const { createApp, ref, reactive, computed, onMounted, watch } = Vue;
 
     // ==================== 组件定义 ====================
-
-    // 通用卡片组件
-    const Card = {
-    name: 'Card',
-    props: {
-        title: { type: String, required: true },
-        icon: { type: String, default: '📄' },
-        status: { 
-            type: String, 
-            default: 'empty',
-            validator: (value) => ['loading', 'empty', 'error', 'content'].includes(value)
-        },
-        emptyText: { type: String, default: '暂无数据' },
-        errorText: { type: String, default: '加载失败' }
-    },
-    template: `
-        <div class="card">
-            <div class="card-header">
-                <span class="card-icon">{{ icon }}</span>
-                <h3 class="card-title">{{ title }}</h3>
-            </div>
-            <div class="card-content">
-                <div v-if="status === 'loading'" class="card-state loading-state">
-                    <div class="spinner"></div>
-                    <p>加载中...</p>
-                </div>
-                <div v-else-if="status === 'empty'" class="card-state empty-state">
-                    <p>{{ emptyText }}</p>
-                </div>
-                <div v-else-if="status === 'error'" class="card-state error-state">
-                    <p>{{ errorText }}</p>
-                </div>
-                <div v-else class="card-body">
-                    <slot></slot>
-                </div>
-            </div>
-        </div>
-    `
-    };
-
-    // 文件预览卡片组件 - 增强版
-    const FilePreviewCard = {
-    name: 'FilePreviewCard',
-    props: { files: { type: Array, default: () => [] } },
-    emits: ['file-selected', 'file-uploaded', 'file-deleted', 'show-message', 'file-process'],
-    data() {
-        return { isDragging: false, selectedFile: null, processingFile: null };
-    },
-    methods: {
-        handleDragOver(e) { e.preventDefault(); this.isDragging = true; },
-        handleDragLeave() { this.isDragging = false; },
-        async handleDrop(e) {
-            e.preventDefault();
-            this.isDragging = false;
-            await this.uploadFiles(Array.from(e.dataTransfer.files));
-        },
-        handleFileSelect(e) { this.uploadFiles(Array.from(e.target.files)); },
-        async uploadFiles(files) {
-            // 支持批量上传
-            if (files.length > 1) {
-                await this.batchUploadFiles(files);
-            } else {
-                for (const file of files) {
-                    await this.uploadSingleFile(file);
-                }
-            }
-        },
-        async uploadSingleFile(file) {
-            if (file.type !== 'application/pdf') {
-                this.$emit('show-message', 'error', `文件 ${file.name} 不是PDF格式`);
-                return;
-            }
-            const formData = new FormData();
-            formData.append('file', file);
-            try {
-                const response = await fetch('/upload/file', { method: 'POST', body: formData });
-                const result = await response.json();
-                if (response.ok) {
-                    this.$emit('file-uploaded');
-                    this.$emit('show-message', 'success', `文件 ${result.filename} 上传成功`);
-                } else {
-                    this.$emit('show-message', 'error', `上传失败: ${result.detail}`);
-                }
-            } catch (error) {
-                this.$emit('show-message', 'error', `上传失败: ${error.message}`);
-            }
-        },
-        async batchUploadFiles(files) {
-            const formData = new FormData();
-            files.forEach(file => {
-                if (file.type === 'application/pdf') {
-                    formData.append('files', file);
-                }
-            });
-            try {
-                const response = await fetch('/upload/files', { method: 'POST', body: formData });
-                const result = await response.json();
-                if (response.ok) {
-                    this.$emit('file-uploaded');
-                    this.$emit('show-message', 'success', result.message);
-                } else {
-                    this.$emit('show-message', 'error', result.detail);
-                }
-            } catch (error) {
-                this.$emit('show-message', 'error', `批量上传失败: ${error.message}`);
-            }
-        },
-        selectFile(file) { this.selectedFile = file; this.$emit('file-selected', file); },
-        async deleteFile(filename, e) {
-            e.stopPropagation();
-            if (!confirm(`确定要删除文件 "${filename}" 吗？`)) return;
-            try {
-                const response = await fetch(`/upload/file/${encodeURIComponent(filename)}`, { method: 'DELETE' });
-                const result = await response.json();
-                if (response.ok) {
-                    this.$emit('file-deleted');
-                    this.$emit('show-message', 'success', `文件 ${filename} 删除成功`);
-                    if (this.selectedFile?.filename === filename) this.selectedFile = null;
-                } else {
-                    this.$emit('show-message', 'error', `删除失败: ${result.detail}`);
-                }
-            } catch (error) {
-                this.$emit('show-message', 'error', `删除失败: ${error.message}`);
-            }
-        },
-        async clearAllFiles() {
-            if (!confirm('确定要清空所有上传的文件吗？此操作不可恢复！')) return;
-            try {
-                const response = await fetch('/upload/clear', { method: 'DELETE' });
-                const result = await response.json();
-                if (response.ok) {
-                    this.$emit('file-deleted');
-                    this.$emit('show-message', 'success', result.message);
-                    this.selectedFile = null;
-                } else {
-                    this.$emit('show-message', 'error', result.detail);
-                }
-            } catch (error) {
-                this.$emit('show-message', 'error', `清空失败: ${error.message}`);
-            }
-        },
-        async processFile(filename) {
-            if (!filename) {
-                this.$emit('show-message', 'error', '请先选择文件');
-                return;
-            }
-            if (!confirm(`确定要处理文件 "${filename}" 吗？\n\n处理过程包括：\n1. 解析PDF文档\n2. 提取表格数据\n3. 构建RAG索引\n\n这可能需要几分钟时间。`)) {
-                return;
-            }
-            this.processingFile = filename;
-            this.$emit('file-process', filename);
-            // 处理完成后重置状态
-            setTimeout(() => {
-                this.processingFile = null;
-            }, 1000);
-        },
-        formatFileSize(bytes) { return (bytes / 1024 / 1024).toFixed(2) + ' MB'; }
-    },
-    template: `
-        <Card title="文件预览" icon="📁" :status="files.length > 0 ? 'content' : 'empty'" empty-text="请上传PDF文件">
-            <template #default>
-                <div :class="['upload-zone', { dragover: isDragging }]" @dragover.prevent="handleDragOver" @dragleave="handleDragLeave" @drop="handleDrop" @click="$refs.fileInput.click()">
-                    <input ref="fileInput" type="file" class="file-input" accept=".pdf" multiple @change="handleFileSelect">
-                    <p>点击或拖拽上传PDF文件（支持批量）</p>
-                </div>
-                <div v-if="files.length > 0" class="file-actions">
-                    <button class="btn-small" @click="processFile(selectedFile?.filename)" :disabled="!selectedFile || processingFile">
-                        {{ processingFile ? '处理中...' : '🔄 处理选中文件' }}
-                    </button>
-                    <button class="btn-small btn-danger" @click="clearAllFiles">🗑️ 清空所有</button>
-                </div>
-                <div v-if="files.length > 0" class="file-list">
-                    <div v-for="file in files" :key="file.filename" :class="['file-item', { active: selectedFile?.filename === file.filename }]" @click="selectFile(file)">
-                        <div class="file-info">
-                            <span class="file-icon">📄</span>
-                            <div class="file-details">
-                                <div class="file-name">{{ file.filename }}</div>
-                                <div class="file-size">{{ formatFileSize(file.file_size) }}</div>
-                            </div>
-                        </div>
-                        <button class="file-delete-btn" @click="deleteFile(file.filename, $event)">×</button>
-                    </div>
-                </div>
-            </template>
-        </Card>
-    `
-    };
-
-    // 聊天区域组件 - 增强版
-    const ChatArea = {
-    name: 'ChatArea',
-    props: { messages: { type: Array, default: () => [] }, loading: { type: Boolean, default: false } },
-    emits: ['send-message', 'clear-chat', 'agent-query', 'get-suggestions', 'batch-query'],
-    data() { 
-        return { 
-            inputText: '', 
-            queryMode: 'normal', // normal, agent, batch
-            suggestions: []
-        }; 
-    },
-    methods: {
-        sendMessage() {
-            if (!this.inputText.trim() || this.loading) return;
-            const question = this.inputText.trim();
-            this.inputText = '';
-            if (this.queryMode === 'agent') {
-                this.$emit('agent-query', question);
-            } else if (this.queryMode === 'batch') {
-                const questions = question.split('\n').filter(q => q.trim());
-                this.$emit('batch-query', questions);
-            } else {
-                this.$emit('send-message', question);
-            }
-        },
-        clearChat() { this.$emit('clear-chat'); },
-        async loadSuggestions() {
-            this.$emit('get-suggestions');
-        },
-        useSuggestion(question) {
-            this.inputText = question;
-        },
-        parseMarkdown(text) { return typeof marked !== 'undefined' ? marked.parse(text) : text; }
-    },
-    mounted() {
-        this.$refs.input?.addEventListener('keydown', (e) => {
-            if (e.ctrlKey && e.key === 'Enter') this.sendMessage();
-        });
-    },
-    template: `
-        <Card title="智能问答" icon="💬" :status="messages.length > 0 || loading ? 'content' : 'empty'" empty-text="开始对话，提出问题">
-            <template #default>
-                <div class="chat-mode-selector">
-                    <button :class="['mode-btn', { active: queryMode === 'normal' }]" @click="queryMode = 'normal'">普通查询</button>
-                    <button :class="['mode-btn', { active: queryMode === 'agent' }]" @click="queryMode = 'agent'">Agent分析</button>
-                    <button :class="['mode-btn', { active: queryMode === 'batch' }]" @click="queryMode = 'batch'">批量查询</button>
-                </div>
-                <div class="chat-messages" ref="messagesContainer">
-                    <div v-for="(msg, index) in messages" :key="index" :class="['chat-message', msg.type]">
-                        <div v-if="msg.type === 'user'" class="message-content">{{ msg.content }}</div>
-                        <div v-else class="message-content" v-html="parseMarkdown(msg.content)"></div>
-                        <div v-if="msg.sources && msg.sources.length > 0" class="message-sources">
-                            <div v-for="(source, idx) in msg.sources" :key="idx" class="source-item">{{ source.text.substring(0, 100) }}...</div>
-                        </div>
-                    </div>
-                    <div v-if="loading" class="chat-message assistant loading">
-                        <div class="spinner"></div>
-                        <span>正在思考...</span>
-                    </div>
-                </div>
-                <div class="chat-input-area">
-                    <div class="chat-actions">
-                        <button class="btn-icon" @click="loadSuggestions" title="获取建议">💡</button>
-                        <button class="btn-icon" @click="clearChat" title="清空对话">🗑️</button>
-                    </div>
-                    <div v-if="queryMode === 'batch'" class="batch-hint">
-                        <small>批量查询模式：每行一个问题</small>
-                    </div>
-                    <div class="chat-input-wrapper">
-                        <textarea ref="input" v-model="inputText" class="chat-input" :placeholder="queryMode === 'batch' ? '输入多个问题，每行一个，按 Ctrl+Enter 发送' : '输入问题，按 Ctrl+Enter 发送'" rows="2"></textarea>
-                        <button class="send-btn" @click="sendMessage" :disabled="!inputText.trim() || loading">发送</button>
-                    </div>
-                </div>
-            </template>
-        </Card>
-    `
-    };
-
-    // 企业概况组件 - 增强版
-    const CompanyOverview = {
-    name: 'CompanyOverview',
-    props: { data: { type: Object, default: null }, loading: { type: Boolean, default: false } },
-    emits: ['generate-report'],
-    data() { return { activeTab: 'basic' }; },
-    computed: {
-        status() {
-            if (this.loading) return 'loading';
-            if (!this.data) return 'empty';
-            return 'content';
+    // 组件已从独立文件加载到 window.Components 中
+    // 检查组件是否已加载
+    function checkComponents() {
+        if (!window.Components) {
+            console.error('❌ 组件未加载，请确保所有组件文件已正确加载');
+            return false;
         }
-    },
-    methods: {
-        async generateReport() {
-            this.$emit('generate-report');
-        },
-        parseMarkdown(text) {
-            if (!text) return '';
-            if (typeof marked !== 'undefined' && marked && marked.parse) {
-                return marked.parse(text);
-            }
-            return text;
+        const requiredComponents = ['Card', 'FilePreviewCard', 'ChatArea', 'CompanyOverview', 'NotesAndRisks', 'DupontAnalysis', 'VisualizationPanel', 'MessageToast'];
+        const missing = requiredComponents.filter(name => !window.Components[name]);
+        if (missing.length > 0) {
+            console.error('❌ 缺少组件:', missing.join(', '));
+            return false;
         }
-    },
-    template: `
-        <Card title="企业概况" icon="🏢" :status="status" empty-text="暂无企业概况数据">
-            <template #default>
-                <div class="tabs-container">
-                    <div class="tabs-header">
-                        <button :class="['tab-btn', { active: activeTab === 'basic' }]" @click="activeTab = 'basic'">基本信息</button>
-                        <button :class="['tab-btn', { active: activeTab === 'business' }]" @click="activeTab = 'business'">业务板块</button>
-                        <button :class="['tab-btn', { active: activeTab === 'finance' }]" @click="activeTab = 'finance'">财务状况</button>
-                    </div>
-                    <div class="tabs-content">
-                        <div v-if="activeTab === 'basic'" class="tab-panel">
-                            <div class="info-item"><span class="info-label">公司名称：</span><span class="info-value">{{ data?.company_name || '—' }}</span></div>
-                            <div class="info-item"><span class="info-label">报告年度：</span><span class="info-value">{{ data?.year || '—' }}</span></div>
-                            <div class="info-item"><span class="info-label">行业分类：</span><span class="info-value">{{ data?.industry || '—' }}</span></div>
-                            <div v-if="!data" class="action-buttons">
-                                <button class="btn-primary" @click="generateReport">📊 生成企业概况</button>
-                            </div>
-                        </div>
-                        <div v-if="activeTab === 'business'" class="tab-panel">
-                            <div v-if="data?.business" v-html="parseMarkdown(data.business)"></div>
-                            <p v-else class="placeholder-text">业务板块信息将在此显示</p>
-                        </div>
-                        <div v-if="activeTab === 'finance'" class="tab-panel">
-                            <div v-if="data?.finance" v-html="parseMarkdown(data.finance)"></div>
-                            <p v-else class="placeholder-text">财务状况信息将在此显示</p>
-                        </div>
-                    </div>
-                </div>
-            </template>
-        </Card>
-    `
-    };
+        return true;
+    }
 
-    // 附注与风险组件 - 增强版
-    const NotesAndRisks = {
-    name: 'NotesAndRisks',
-    props: { data: { type: Object, default: null }, loading: { type: Boolean, default: false } },
-    emits: ['generate-section'],
-    computed: {
-        status() {
-            if (this.loading) return 'loading';
-            if (!this.data) return 'empty';
-            return 'content';
-        }
-    },
-    methods: {
-        async generateSection() {
-            this.$emit('generate-section', 'financial_review');
-        },
-        parseMarkdown(text) {
-            if (!text) return '';
-            if (typeof marked !== 'undefined' && marked && marked.parse) {
-                return marked.parse(text);
-            }
-            return text;
-        }
-    },
-    template: `
-        <Card title="附注与风险" icon="⚠️" :status="status" empty-text="暂无附注与风险信息">
-            <template #default>
-                <div class="notes-risks-content">
-                    <div v-if="data?.notes" class="section">
-                        <h4>重要附注</h4>
-                        <div v-html="parseMarkdown(data.notes)"></div>
-                    </div>
-                    <div v-if="data?.risks" class="section">
-                        <h4>风险提示</h4>
-                        <div v-html="parseMarkdown(data.risks)"></div>
-                    </div>
-                    <div v-if="!data" class="action-buttons">
-                        <button class="btn-primary" @click="generateSection">📝 生成附注与风险</button>
-                    </div>
-                    <div v-if="!data" class="placeholder-text">附注与风险信息将在此显示</div>
-                </div>
-            </template>
-        </Card>
-    `
-    };
-
-    // 杜邦分析组件
-    const DupontAnalysis = {
-    name: 'DupontAnalysis',
-    props: { data: { type: Object, default: null }, loading: { type: Boolean, default: false } },
-    computed: {
-        status() {
-            if (this.loading) return 'loading';
-            if (!this.data) return 'empty';
-            return 'content';
-        }
-    },
-    template: `
-        <Card title="杜邦分析" icon="📊" :status="status" empty-text="暂无杜邦分析数据">
-            <template #default>
-                <div class="dupont-content">
-                    <div v-if="data" class="dupont-tree">
-                        <div class="dupont-item main">
-                            <div class="dupont-label">ROE</div>
-                            <div class="dupont-value">{{ data.roe || '—' }}</div>
-                        </div>
-                        <div class="dupont-branches">
-                            <div class="dupont-item">
-                                <div class="dupont-label">ROA</div>
-                                <div class="dupont-value">{{ data.roa || '—' }}</div>
-                            </div>
-                            <div class="dupont-item">
-                                <div class="dupont-label">权益乘数</div>
-                                <div class="dupont-value">{{ data.equity_multiplier || '—' }}</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div v-else class="placeholder-text">杜邦分析数据将在此显示</div>
-                </div>
-            </template>
-        </Card>
-    `
-    };
-
-    // 可视化面板组件 - 增强版（包含洞察和推荐）
-    const VisualizationPanel = {
-    name: 'VisualizationPanel',
-    props: { 
-        chartData: { type: Object, default: null }, 
-        loading: { type: Boolean, default: false } 
-    },
-    computed: {
-        status() {
-            if (this.loading) return 'loading';
-            if (!this.chartData || !this.chartData.has_visualization) return 'empty';
-            return 'content';
-        },
-        hasInsights() {
-            return this.chartData?.insights && this.chartData.insights.length > 0;
-        },
-        hasRecommendation() {
-            return this.chartData?.recommendation != null;
-        },
-        confidenceScore() {
-            return this.chartData?.confidence_score || 0;
-        }
-    },
-    methods: {
-        renderChart() {
-            if (!this.chartData?.chart_config || !window.Plotly) {
-                if (!window.Plotly) {
-                    console.warn('Plotly未加载，无法渲染图表');
-                }
-                return;
-            }
-            this.$nextTick(() => {
-                try {
-                    const chartConfig = this.chartData.chart_config;
-                    const traces = chartConfig.traces.map(trace => {
-                        const plotlyTrace = { 
-                            type: trace.type || 'scatter', 
-                            name: trace.name || '数据' 
-                        };
-                        // 特殊处理饼图
-                        if (trace.type === 'pie') {
-                            plotlyTrace.labels = trace.text || [];
-                            plotlyTrace.values = trace.y || [];
-                        } else {
-                            plotlyTrace.x = trace.x || [];
-                            plotlyTrace.y = trace.y || [];
-                        }
-                        if (trace.mode) plotlyTrace.mode = trace.mode;
-                        if (trace.marker) plotlyTrace.marker = trace.marker;
-                        if (trace.line) plotlyTrace.line = trace.line;
-                        if (trace.type !== 'pie' && trace.text) plotlyTrace.text = trace.text;
-                        if (trace.textposition) plotlyTrace.textposition = trace.textposition;
-                        if (trace.hovertemplate) plotlyTrace.hovertemplate = trace.hovertemplate;
-                        return plotlyTrace;
-                    });
-                    const layout = {
-                        title: { 
-                            text: chartConfig.layout.title || '', 
-                            font: { size: 18, color: '#333' } 
-                        },
-                        xaxis: { 
-                            title: chartConfig.layout.xaxis_title || '', 
-                            gridcolor: '#e0e0e0' 
-                        },
-                        yaxis: { 
-                            title: chartConfig.layout.yaxis_title || '', 
-                            gridcolor: '#e0e0e0' 
-                        },
-                        height: chartConfig.layout.height || 500,
-                        template: chartConfig.layout.template || 'plotly_white',
-                        hovermode: chartConfig.layout.hovermode || 'closest',
-                        showlegend: chartConfig.layout.showlegend !== false,
-                        margin: { t: 60, r: 40, b: 60, l: 60 },
-                        paper_bgcolor: 'rgba(0,0,0,0)',
-                        plot_bgcolor: 'rgba(0,0,0,0)'
-                    };
-                    const config = { 
-                        responsive: true, 
-                        displayModeBar: true, 
-                        displaylogo: false, 
-                        modeBarButtonsToRemove: ['lasso2d', 'select2d'] 
-                    };
-                    if (window.Plotly && window.Plotly.newPlot) {
-                        window.Plotly.newPlot('visualizationChart', traces, layout, config);
-                    } else {
-                        console.warn('Plotly未加载，无法渲染图表');
-                    }
-                } catch (error) {
-                    console.error('渲染图表失败:', error);
-                    const chartDiv = document.getElementById('visualizationChart');
-                    if (chartDiv) {
-                        chartDiv.innerHTML = `<div class="error-message"><p>图表渲染失败: ${error.message}</p></div>`;
-                    }
-                }
-            });
-        },
-        getInsightIcon(type) {
-            const icons = {
-                'trend': '📈',
-                'comparison': '⚖️',
-                'distribution': '📊',
-                'correlation': '🔗',
-                'anomaly': '⚠️'
-            };
-            return icons[type] || '💡';
-        },
-        getChartTypeName(type) {
-            const names = {
-                'bar': '柱状图',
-                'line': '折线图',
-                'pie': '饼图',
-                'scatter': '散点图',
-                'area': '面积图',
-                'multi_line': '多折线图',
-                'grouped_bar': '分组柱状图',
-                'stacked_bar': '堆叠柱状图',
-                'heatmap': '热力图',
-                'box': '箱线图',
-                'waterfall': '瀑布图',
-                'funnel': '漏斗图',
-                'gauge': '仪表盘',
-                'table': '表格'
-            };
-            return names[type] || type;
-        }
-    },
-    watch: {
-        chartData: { 
-            handler() { 
-                if (this.chartData && this.chartData.has_visualization) {
-                    this.renderChart();
-                }
-            }, 
-            deep: true 
-        }
-    },
-    template: `
-        <Card title="数据可视化" icon="📈" :status="status" empty-text="图表将在此显示">
-            <template #default>
-                <!-- 图表区域 -->
-                <div v-if="chartData && chartData.has_visualization" class="visualization-content">
-                    <div class="chart-header">
-                        <h3>📊 数据可视化 <span class="viz-badge">智能生成</span></h3>
-                        <div v-if="confidenceScore > 0" class="confidence-badge">
-                            置信度: {{ (confidenceScore * 100).toFixed(0) }}%
-                        </div>
-                    </div>
-                    
-                    <div id="visualizationChart" class="chart-container"></div>
-                    
-                    <!-- 推荐说明 -->
-                    <div v-if="hasRecommendation" class="recommendation-box">
-                        <h4>📈 图表推荐</h4>
-                        <p><strong>推荐图表类型:</strong> {{ getChartTypeName(chartData.recommendation.recommended_chart_type) }}</p>
-                        <p><strong>推荐理由:</strong> {{ chartData.recommendation.reason }}</p>
-                    </div>
-                    
-                    <!-- 数据洞察 -->
-                    <div v-if="hasInsights" class="insights-box">
-                        <h3>💡 数据洞察</h3>
-                        <div 
-                            v-for="(insight, index) in chartData.insights" 
-                            :key="index" 
-                            class="insight-item"
-                        >
-                            <h4>
-                                {{ getInsightIcon(insight.insight_type) }} 
-                                {{ insight.description }}
-                            </h4>
-                            <ul v-if="insight.key_findings && insight.key_findings.length > 0">
-                                <li v-for="(finding, idx) in insight.key_findings" :key="idx">
-                                    {{ finding }}
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- 错误提示 -->
-                <div v-else-if="chartData && chartData.error" class="error-message">
-                    <p>⚠️ 可视化生成失败: {{ chartData.error }}</p>
-                </div>
-                
-                <!-- 无可视化提示 -->
-                <div v-else-if="chartData && !chartData.has_visualization" class="no-viz-message">
-                    <p>ℹ️ 此问题不包含可视化数据。尝试询问包含数值、趋势、对比等关键词的问题以获得图表展示。</p>
-                </div>
-            </template>
-        </Card>
-    `
-    };
-
-    // 消息提示组件
-    const MessageToast = {
-    props: ['message'],
-    template: `
-        <transition name="fade">
-            <div v-if="message.text" :class="['message-toast', message.type]">{{ message.text }}</div>
-        </transition>
-    `
-    };
 
     // ==================== 主应用 ====================
 
@@ -973,51 +379,11 @@
             }
         };
         
-        const handleBatchQuery = async (questions) => {
-            if (questions.length === 0) return;
-            queryLoading.value = true;
-            try {
-                const response = await fetch('/query/batch', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ questions, enable_visualization: true })
-                });
-                const result = await response.json();
-                if (response.ok) {
-                    questions.forEach((q, i) => {
-                        chatMessages.value.push({ type: 'user', content: q, timestamp: new Date() });
-                        const res = result.results[i];
-                        if (res.status === 'success') {
-                            chatMessages.value.push({ type: 'assistant', content: res.answer, sources: res.sources, timestamp: new Date() });
-                        } else {
-                            chatMessages.value.push({ type: 'assistant', content: `错误: ${res.error}`, timestamp: new Date() });
-                        }
-                    });
-                } else {
-                    showMessage('error', result.detail);
-                }
-            } catch (error) {
-                showMessage('error', `批量查询失败: ${error.message}`);
-            } finally {
-                queryLoading.value = false;
-            }
-        };
-        
         const handleGetSuggestions = async () => {
             try {
                 const response = await fetch('/query/suggestions');
                 const data = await response.json();
                 suggestions.value = data.suggestions || [];
-                if (suggestions.value.length > 0) {
-                    const suggestionText = suggestions.value.map(cat => 
-                        `${cat.category}:\n${cat.questions.map(q => `- ${q}`).join('\n')}`
-                    ).join('\n\n');
-                    chatMessages.value.push({ 
-                        type: 'assistant', 
-                        content: `💡 查询建议：\n\n${suggestionText}`, 
-                        timestamp: new Date() 
-                    });
-                }
             } catch (error) {
                 showMessage('error', `获取建议失败: ${error.message}`);
             }
@@ -1080,6 +446,84 @@
             visualizationData.value = null;
         };
         
+        const handleAnalysisQuery = async (question) => {
+            // 文件分析查询处理（可以复用普通查询逻辑，或者使用专门的接口）
+            queryLoading.value = true;
+            chatMessages.value.push({ 
+                type: 'user', 
+                content: `📊 文件分析：${question}`, 
+                timestamp: new Date() 
+            });
+            
+            try {
+                const response = await fetch('/query/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question, enable_visualization: true })
+                });
+                
+                // 检查HTTP状态码
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ detail: '请求失败' }));
+                    const errorMsg = errorData.detail || errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+                    chatMessages.value.push({ 
+                        type: 'assistant', 
+                        content: `❌ 分析失败: ${errorMsg}\n\n提示：请确保已上传并处理文档，索引已构建完成。`, 
+                        timestamp: new Date() 
+                    });
+                    showMessage('error', errorMsg);
+                    return;
+                }
+                
+                const result = await response.json();
+                
+                // 检查结果中是否有错误
+                if (result.error) {
+                    const errorMsg = result.answer || result.error || '分析失败';
+                    chatMessages.value.push({ 
+                        type: 'assistant', 
+                        content: `❌ ${errorMsg}`, 
+                        timestamp: new Date() 
+                    });
+                    showMessage('error', errorMsg);
+                    return;
+                }
+                
+                // 成功处理
+                if (result.answer) {
+                    chatMessages.value.push({ 
+                        type: 'assistant', 
+                        content: result.answer, 
+                        sources: result.sources || [],
+                        timestamp: new Date() 
+                    });
+                    
+                    // 处理可视化
+                    if (result.visualization && result.visualization.has_visualization) {
+                        visualizationData.value = result.visualization;
+                        visualizationLoading.value = false;
+                    }
+                } else {
+                    chatMessages.value.push({ 
+                        type: 'assistant', 
+                        content: '⚠️ 未收到有效回答，请重试。', 
+                        timestamp: new Date() 
+                    });
+                }
+            } catch (error) {
+                console.error('分析错误:', error);
+                const errorMsg = error.message || '网络错误或服务器无响应';
+                chatMessages.value.push({ 
+                    type: 'assistant', 
+                    content: `❌ 分析失败: ${errorMsg}\n\n可能的原因：\n1. 网络连接问题\n2. 服务器未响应\n3. 索引未构建完成\n\n请检查网络连接，确保已处理文档。`, 
+                    timestamp: new Date() 
+                });
+                showMessage('error', errorMsg);
+            } finally {
+                queryLoading.value = false;
+            }
+        };
+        
         // 检查索引状态
         const checkIndexStatus = async () => {
             try {
@@ -1115,8 +559,8 @@
             companyOverviewData, companyOverviewLoading, notesAndRisksData, notesAndRisksLoading,
             dupontData, dupontLoading, visualizationData, visualizationLoading, processStatus, suggestions,
             showMessage, handleFileSelected, handleFileUploaded, handleFileDeleted, handleFileProcess,
-            handleSendMessage, handleAgentQuery, handleBatchQuery, handleGetSuggestions,
-            handleGenerateReport, handleGenerateSection, handleClearChat, checkIndexStatus
+            handleSendMessage, handleAgentQuery, handleGetSuggestions,
+            handleGenerateReport, handleGenerateSection, handleClearChat, handleAnalysisQuery, checkIndexStatus
         };
     },
     template: `
@@ -1132,16 +576,10 @@
             <main class="app-main">
                 <aside class="left-panel">
                     <FilePreviewCard :files="files" @file-selected="handleFileSelected" @file-uploaded="handleFileUploaded" @file-deleted="handleFileDeleted" @file-process="handleFileProcess" @show-message="showMessage" />
-                    <ChatArea :messages="chatMessages" :loading="queryLoading" @send-message="handleSendMessage" @agent-query="handleAgentQuery" @batch-query="handleBatchQuery" @get-suggestions="handleGetSuggestions" @clear-chat="handleClearChat" />
+                    <CompanyOverview :data="companyOverviewData" :loading="companyOverviewLoading" @generate-report="handleGenerateReport" />
                 </aside>
                 <section class="middle-panel">
-                    <div class="middle-top">
-                        <CompanyOverview :data="companyOverviewData" :loading="companyOverviewLoading" @generate-report="handleGenerateReport" />
-                        <NotesAndRisks :data="notesAndRisksData" :loading="notesAndRisksLoading" @generate-section="handleGenerateSection" />
-                    </div>
-                    <div class="middle-bottom">
-                        <DupontAnalysis :data="dupontData" :loading="dupontLoading" />
-                    </div>
+                    <ChatArea :messages="chatMessages" :loading="queryLoading" :suggestions="suggestions" @send-message="handleSendMessage" @agent-query="handleAgentQuery" @get-suggestions="handleGetSuggestions" @clear-chat="handleClearChat" />
                 </section>
                 <aside class="right-panel">
                     <VisualizationPanel :chart-data="visualizationData" :loading="visualizationLoading" />
@@ -1159,15 +597,21 @@
             throw new Error('Vue createApp未定义，请检查Vue是否正确加载');
         }
         
+        // 检查组件是否已加载
+        if (!checkComponents()) {
+            throw new Error('组件未完全加载，请刷新页面重试');
+        }
+        
         const app = createApp(App);
-        app.component('Card', Card);
-        app.component('FilePreviewCard', FilePreviewCard);
-        app.component('ChatArea', ChatArea);
-        app.component('CompanyOverview', CompanyOverview);
-        app.component('NotesAndRisks', NotesAndRisks);
-        app.component('DupontAnalysis', DupontAnalysis);
-        app.component('VisualizationPanel', VisualizationPanel);
-        app.component('MessageToast', MessageToast);
+        // 从全局组件对象注册组件
+        app.component('Card', window.Components.Card);
+        app.component('FilePreviewCard', window.Components.FilePreviewCard);
+        app.component('ChatArea', window.Components.ChatArea);
+        app.component('CompanyOverview', window.Components.CompanyOverview);
+        app.component('NotesAndRisks', window.Components.NotesAndRisks);
+        app.component('DupontAnalysis', window.Components.DupontAnalysis);
+        app.component('VisualizationPanel', window.Components.VisualizationPanel);
+        app.component('MessageToast', window.Components.MessageToast);
         
         // 等待DOM加载完成
         if (document.readyState === 'loading') {

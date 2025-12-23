@@ -7,8 +7,9 @@ import shutil
 from pathlib import Path
 from typing import List
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse, Response
 import logging
+import urllib.parse
 
 logger = logging.getLogger(__name__)
 
@@ -267,6 +268,61 @@ async def delete_file(filename: str):
         logger.error(f"删除文件失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"删除文件失败: {str(e)}")
 
+@router.get("/file/{filename}")
+async def get_file(filename: str):
+    """
+    获取上传的文件（用于预览）
+    
+    Args:
+        filename: 文件名
+        
+    Returns:
+        文件内容
+    """
+    try:
+        upload_dir = Path("uploads")
+        file_path = upload_dir / filename
+        
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="文件不存在")
+        
+        if not file_path.is_file():
+            raise HTTPException(status_code=400, detail="不是有效的文件")
+        
+        # 检查文件扩展名
+        if file_path.suffix.lower() != '.pdf':
+            raise HTTPException(status_code=400, detail="只支持PDF文件预览")
+        
+        # 读取文件内容
+        with open(file_path, 'rb') as f:
+            file_content = f.read()
+        
+        # 处理中文文件名：使用 RFC 5987 编码
+        # 先尝试 UTF-8 编码，如果失败则使用 URL 编码
+        try:
+            # 使用 RFC 5987 格式编码文件名（支持中文）
+            encoded_filename = urllib.parse.quote(filename, safe='')
+            content_disposition = f"inline; filename*=UTF-8''{encoded_filename}"
+        except Exception:
+            # 如果编码失败，使用原始文件名（可能在某些浏览器中显示不正确）
+            content_disposition = f'inline; filename="{filename}"'
+        
+        # 返回文件（设置为inline，在浏览器中预览而不是下载）
+        return Response(
+            content=file_content,
+            media_type='application/pdf',
+            headers={
+                'Content-Disposition': content_disposition,
+                'Content-Length': str(len(file_content))
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取文件失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取文件失败: {str(e)}")
+
 @router.delete("/clear")
 async def clear_uploads():
     """
@@ -307,21 +363,27 @@ async def clear_uploads():
         raise HTTPException(status_code=500, detail=f"清空上传目录失败: {str(e)}")
 
 def _generate_safe_filename(filename: str) -> str:
-    """生成安全的文件名"""
+    """生成安全的文件名（保留原始文件名，同名时覆盖）"""
+    import os
     import re
-    import time
     
-    # 移除路径分隔符和特殊字符
-    safe_name = re.sub(r'[^\w\-_\.]', '_', filename)
+    # 获取文件名（去除路径）
+    safe_name = os.path.basename(filename)
     
-    # 添加时间戳避免重名
-    name_parts = safe_name.rsplit('.', 1)
-    if len(name_parts) == 2:
-        name, ext = name_parts
-        timestamp = int(time.time())
-        safe_name = f"{name}_{timestamp}.{ext}"
-    else:
-        timestamp = int(time.time())
-        safe_name = f"{safe_name}_{timestamp}"
+    # 移除不安全的字符，保留中文字符、数字、字母、连字符、下划线、点和空格
+    # Windows 不允许的字符: < > : " / \ | ? *
+    # 控制字符: \x00-\x1f
+    safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', safe_name)
+    
+    # 移除首尾空格和点
+    safe_name = safe_name.strip(' .')
+    
+    # 如果文件名为空或只有特殊字符，使用默认名称
+    if not safe_name or safe_name.strip() == '':
+        safe_name = 'uploaded_file.pdf'
+    
+    # 确保文件名不为空且有效
+    if not safe_name:
+        safe_name = 'uploaded_file.pdf'
     
     return safe_name
