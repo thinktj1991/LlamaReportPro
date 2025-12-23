@@ -83,10 +83,25 @@ async def process_file(request: ProcessRequest):
         index_built = False
         if build_index:
             try:
+                logger.info("🔨 开始构建索引...")
+                logger.info(f"   文档数: {len(processed_docs)}")
+                logger.info(f"   表格数: {sum(len(tables) for tables in extracted_tables.values())}")
+                
                 index_built = rag_engine.build_index(processed_docs, extracted_tables)
-                logger.info(f"索引构建{'成功' if index_built else '失败'}")
+                
+                if index_built:
+                    index_stats = rag_engine.get_index_stats()
+                    logger.info(f"✅ 索引构建成功!")
+                    logger.info(f"   状态: {index_stats.get('status', 'unknown')}")
+                    logger.info(f"   文档数: {index_stats.get('document_count', 0)}")
+                    logger.info(f"   向量数: {index_stats.get('vector_count', 0)}")
+                    logger.info(f"   存储目录: {index_stats.get('storage_dir', 'unknown')}")
+                else:
+                    logger.error("❌ 索引构建失败: build_index 返回 False")
+                    logger.error("   请检查日志以获取详细信息")
             except Exception as e:
-                logger.warning(f"索引构建失败: {str(e)}")
+                logger.error(f"❌ 索引构建异常: {str(e)}", exc_info=True)
+                # 不抛出异常，但记录详细错误
         
         # 生成处理摘要
         doc_summary = document_processor.get_document_summary(doc_result['documents'])

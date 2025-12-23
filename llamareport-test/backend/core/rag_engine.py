@@ -113,18 +113,29 @@ class RAGEngine:
     def load_existing_index(self) -> bool:
         """从现有的ChromaDB集合加载索引"""
         try:
+            logger.info(f"🔄 开始加载索引...")
+            logger.info(f"   存储目录: {self.storage_dir.absolute()}")
+            logger.info(f"   ChromaDB路径: {(self.storage_dir / 'chroma').absolute()}")
+            
             if not self.llama_index_ready:
                 logger.error("❌ LlamaIndex未就绪，无法加载索引")
+                logger.error("   请检查 OPENAI_API_KEY 和 DEEPSEEK_API_KEY 环境变量")
                 return False
 
             if not self.chroma_collection:
                 logger.error("❌ ChromaDB集合未初始化")
+                logger.error(f"   集合名称: {self.collection_name}")
                 return False
 
             # 检查集合是否有数据
             collection_count = self.chroma_collection.count()
+            logger.info(f"📊 ChromaDB集合 '{self.collection_name}' 包含 {collection_count} 个向量")
+            
             if collection_count == 0:
                 logger.warning("⚠️ ChromaDB集合为空，无法加载索引")
+                logger.warning(f"   存储目录: {self.storage_dir.absolute()}")
+                logger.warning(f"   ChromaDB路径: {(self.storage_dir / 'chroma').absolute()}")
+                logger.warning("   请先处理文档并构建索引")
                 return False
 
             # 创建向量存储
@@ -156,17 +167,29 @@ class RAGEngine:
             qa_prompt = PromptTemplate(qa_prompt_tmpl)
 
             self.query_engine = self.index.as_query_engine(
-                similarity_top_k=10,  # 增加检索数量
+                similarity_top_k=20,  # 增加检索数量（从10增加到20，提高检索精度）
                 response_mode="compact",  # 使用compact模式保留更多细节
                 text_qa_template=qa_prompt,
                 verbose=True
             )
 
             logger.info(f"✅ 成功从ChromaDB加载索引，包含 {collection_count} 个向量")
+            
+            # 同时尝试加载Hybrid Retriever索引
+            if self.use_hybrid_retriever:
+                logger.info("🔄 尝试加载Hybrid Retriever索引...")
+                hybrid_loaded = self.hybrid_retriever.load_existing_index()
+                if hybrid_loaded:
+                    logger.info("✅ Hybrid Retriever索引加载成功")
+                else:
+                    logger.warning("⚠️ Hybrid Retriever索引未加载（可能需要重新构建）")
+            
             return True
 
         except Exception as e:
             logger.error(f"❌ 加载索引失败: {str(e)}")
+            import traceback
+            logger.error(f"详细错误: {traceback.format_exc()}")
             return False
     
     def build_index(self, processed_documents: Dict[str, Any], extracted_tables: Dict[str, List[Dict]] = None) -> bool:
@@ -293,7 +316,7 @@ class RAGEngine:
             qa_prompt = PromptTemplate(qa_prompt_tmpl)
 
             self.query_engine = self.index.as_query_engine(
-                similarity_top_k=10,  # 增加检索数量
+                similarity_top_k=20,  # 增加检索数量（从10增加到20，提高检索精度）
                 response_mode="compact",  # 使用compact模式保留更多细节
                 text_qa_template=qa_prompt,
                 verbose=True
@@ -354,6 +377,21 @@ class RAGEngine:
                 table_data = table['table_data']
                 columns = table_data['columns']
                 data_rows = table_data['data']
+
+                # 提取表格中的关键财务指标（从列名中）
+                financial_indicators = []
+                common_indicators = ['营业收入', '营收', '收入', '净利润', '利润', '资产', '负债', '现金流', 
+                                   'ROE', 'ROA', '毛利率', '净利率', '总资产', '净资产', '股东权益']
+                for col in columns:
+                    col_str = str(col)
+                    for indicator in common_indicators:
+                        if indicator in col_str:
+                            financial_indicators.append(indicator)
+                            break
+                
+                # 如果识别到财务指标，在开头标注
+                if financial_indicators:
+                    text_parts.append(f"\n💰 **包含的财务指标**: {', '.join(set(financial_indicators))}")
 
                 # 生成Markdown表格
                 text_parts.append("\n**表格内容（Markdown格式）：**\n")
@@ -434,15 +472,32 @@ class RAGEngine:
 
             if not self.query_engine:
                 print("🔄 尝试加载现有索引...")
+                logger.info(f"查询引擎未初始化，尝试加载现有索引...")
+                logger.info(f"存储目录: {self.storage_dir.absolute()}")
+                
                 # 尝试从现有的ChromaDB集合加载索引
                 if not self.load_existing_index():
                     print("❌ 无法加载现有索引")
+                    # 检查具体原因
+                    error_details = []
+                    if not self.llama_index_ready:
+                        error_details.append("LlamaIndex未就绪（请检查API密钥）")
+                    elif not self.chroma_collection:
+                        error_details.append("ChromaDB集合未初始化")
+                    elif self.chroma_collection and self.chroma_collection.count() == 0:
+                        error_details.append(f"ChromaDB集合 '{self.collection_name}' 为空")
+                    else:
+                        error_details.append("索引加载失败（请查看日志）")
+                    
+                    error_msg = "RAG系统未初始化: " + "；".join(error_details) + "。请先处理文档并构建索引。"
+                    logger.error(f"❌ {error_msg}")
                     return {
-                        'answer': "RAG系统未初始化，请先处理文档。",
+                        'answer': error_msg,
                         'sources': [],
                         'error': True
                     }
                 print("✅ 成功加载现有索引")
+                logger.info("✅ 索引加载成功，可以开始查询")
             
             # 增强查询
             print("🔧 增强查询...")
@@ -484,11 +539,41 @@ class RAGEngine:
                     sources = self._extract_sources(response)
             else:
                 print("🔍 执行传统向量检索和LLM生成...")
+                # 检查Hybrid Retriever索引状态
+                if self.use_hybrid_retriever:
+                    text_ready = self.hybrid_retriever.text_index is not None
+                    table_ready = self.hybrid_retriever.table_index is not None
+                    print(f"   Hybrid Retriever状态: 文本索引={'✅' if text_ready else '❌'}, 表格索引={'✅' if table_ready else '❌'}")
+                    if not text_ready or not table_ready:
+                        print("   ⚠️ Hybrid Retriever索引未完全加载，使用传统检索")
+                        print("   💡 提示: 如果检索结果不准确，请重新处理文档以构建Hybrid Retriever索引")
+                
                 response = self.query_engine.query(enhanced_query)
                 
                 # 提取来源信息
                 print("📚 提取来源信息...")
                 sources = self._extract_sources(response)
+                
+                # 打印检索到的来源摘要（帮助诊断）
+                if sources:
+                    print(f"   📋 检索到的来源摘要:")
+                    for i, source in enumerate(sources[:3], 1):
+                        source_type = source.get('metadata', {}).get('document_type', 'unknown')
+                        source_text = source.get('text', '')
+                        source_preview = source_text[:150].replace('\n', ' ')
+                        
+                        # 检查是否包含查询关键词
+                        question_lower = question.lower()
+                        contains_keyword = any(keyword in source_text.lower() for keyword in question_lower.split())
+                        
+                        relevance_marker = "✅" if contains_keyword else "⚠️"
+                        print(f"      {i}. [{source_type}] {relevance_marker} {source_preview}...")
+                        
+                        # 如果是表格，显示表格ID
+                        if source_type == 'table_data':
+                            table_id = source.get('metadata', {}).get('table_id', 'unknown')
+                            page_num = source.get('metadata', {}).get('page_number', 'unknown')
+                            print(f"         表格ID: {table_id}, 页码: {page_num}")
             
             result = {
                 'answer': str(response),
@@ -525,6 +610,18 @@ class RAGEngine:
         enhanced_parts.append("【重要指令】请仔细阅读下面检索到的文档内容，特别是表格数据，并基于这些具体数据来回答问题。")
         enhanced_parts.append("如果检索到的内容中包含表格，请务必分析表格中的数值数据。")
         enhanced_parts.append("")
+
+        # 提取关键词并强调（特别是财务指标）
+        financial_keywords = ['营业收入', '净利润', '资产', '负债', '现金流', 'ROE', 'ROA', '毛利率', '净利率']
+        question_keywords = []
+        for keyword in financial_keywords:
+            if keyword in question:
+                question_keywords.append(keyword)
+        
+        if question_keywords:
+            enhanced_parts.append(f"【关键指标】本次查询重点关注以下财务指标: {', '.join(question_keywords)}")
+            enhanced_parts.append("请优先检索和回答与这些指标相关的数据。")
+            enhanced_parts.append("")
 
         # 添加原始问题
         enhanced_parts.append(f"【用户问题】{question}")

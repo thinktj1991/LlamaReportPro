@@ -174,7 +174,7 @@ class VisualizationAgent:
         sources: Optional[List[Dict]] = None
     ) -> Dict[str, Any]:
         """
-        从回答中提取数据
+        从回答和来源中提取数据（优先从sources中的表格数据提取）
         
         Args:
             query: 用户查询
@@ -185,6 +185,25 @@ class VisualizationAgent:
             Dict: 提取的数据
         """
         try:
+            # 1. 优先从sources中提取表格数据
+            if sources:
+                table_sources = [s for s in sources if s.get('metadata', {}).get('document_type') == 'table_data']
+                if table_sources:
+                    logger.info(f"📊 发现 {len(table_sources)} 个表格来源，尝试从中提取数据")
+                    table_data = await self._extract_data_from_table_sources(query, table_sources, answer)
+                    if table_data and table_data.get('has_data'):
+                        logger.info(f"✅ 从表格来源成功提取数据: {table_data.get('data_type', 'unknown')}")
+                        return table_data
+            
+            # 2. 如果sources中没有表格数据，或提取失败，从answer文本中提取
+            logger.info("📝 从文本回答中提取数据...")
+            
+            # 构建数据来源信息（避免在f-string中使用反斜杠）
+            sources_info = ""
+            if sources:
+                sources_texts = "\n".join([f"- {s.get('text', '')[:200]}..." for s in sources[:3]])
+                sources_info = f"数据来源信息（包含表格数据）:\n{sources_texts}\n"
+            
             prompt = f"""
 分析以下查询和回答，提取可用于可视化的数据。
 
@@ -192,6 +211,7 @@ class VisualizationAgent:
 
 回答: {answer}
 
+{sources_info}
 请提取以下信息（以JSON格式返回）：
 1. has_data: 是否包含可视化数据（true/false）
 2. data_type: 数据类型（time_series/comparison/distribution/single_value/table）
@@ -204,7 +224,7 @@ class VisualizationAgent:
 示例输出：
 {{
     "has_data": true,
-    "data_type": "comparison",
+    "data_type": "time_series",
     "labels": ["2021年", "2022年", "2023年"],
     "values": [100, 120, 150],
     "unit": "亿元",
@@ -226,7 +246,16 @@ class VisualizationAgent:
                 json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
                 if json_match:
                     data = json.loads(json_match.group())
-                    logger.info(f"成功提取数据: {data.get('data_type', 'unknown')}")
+                    data_type = data.get('data_type', 'unknown')
+                    if data_type == 'unknown' and data.get('has_data'):
+                        # 如果data_type是unknown但has_data是true，尝试推断类型
+                        if data.get('values') and len(data.get('values', [])) > 1:
+                            if '年' in str(data.get('labels', [])) or '月' in str(data.get('labels', [])):
+                                data['data_type'] = 'time_series'
+                            else:
+                                data['data_type'] = 'comparison'
+                        logger.info(f"✅ 推断数据类型: {data['data_type']}")
+                    logger.info(f"成功提取数据: {data_type}")
                     return data
                 else:
                     return {"has_data": False}
@@ -236,6 +265,104 @@ class VisualizationAgent:
                 
         except Exception as e:
             logger.error(f"提取数据失败: {str(e)}")
+            import traceback
+            logger.error(f"详细错误: {traceback.format_exc()}")
+            return {"has_data": False}
+    
+    async def _extract_data_from_table_sources(
+        self,
+        query: str,
+        table_sources: List[Dict],
+        answer: str
+    ) -> Dict[str, Any]:
+        """
+        从表格来源中提取数据
+        
+        Args:
+            query: 用户查询
+            table_sources: 表格来源列表
+            answer: 文本回答
+        
+        Returns:
+            Dict: 提取的数据
+        """
+        try:
+            # 合并所有表格文本
+            table_texts = []
+            for source in table_sources:
+                text = source.get('text', '')
+                if text:
+                    table_texts.append(text)
+            
+            if not table_texts:
+                return {"has_data": False}
+            
+            combined_table_text = "\n\n".join(table_texts[:3])  # 最多使用前3个表格
+            
+            prompt = f"""
+分析以下查询和表格数据，提取可用于可视化的数据。
+
+查询: {query}
+
+文本回答: {answer}
+
+表格数据:
+{combined_table_text}
+
+请从表格数据中提取以下信息（以JSON格式返回）：
+1. has_data: 是否包含可视化数据（true/false）
+2. data_type: 数据类型（time_series/comparison/distribution/single_value/table）
+3. labels: 标签列表（如年份、类别等）
+4. values: 数值列表
+5. series: 多系列数据（如果有多个指标）
+6. unit: 数值单位（如元、%、万等）
+7. time_period: 时间周期（如果是时间序列）
+
+重要提示：
+- 如果查询涉及"趋势"、"变化"、"增长"等，data_type应该是time_series
+- 如果查询涉及"对比"、"比较"，data_type应该是comparison
+- 必须从表格中提取具体的数值，不要使用占位符
+- 如果表格中有多列数据，提取所有相关列
+
+示例输出：
+{{
+    "has_data": true,
+    "data_type": "time_series",
+    "labels": ["2021年", "2022年", "2023年"],
+    "values": [1000000, 1200000, 1500000],
+    "unit": "元",
+    "time_period": "年度"
+}}
+
+如果无法从表格中提取数据，返回：
+{{
+    "has_data": false
+}}
+"""
+            
+            response = await self.llm.acomplete(prompt)
+            response_text = str(response).strip()
+            
+            # 尝试解析JSON
+            try:
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                if json_match:
+                    data = json.loads(json_match.group())
+                    # 验证数据有效性
+                    if data.get('has_data') and data.get('values') and len(data.get('values', [])) > 0:
+                        return data
+                    else:
+                        logger.warning("提取的数据无效（缺少values或values为空）")
+                        return {"has_data": False}
+                else:
+                    return {"has_data": False}
+            except json.JSONDecodeError as e:
+                logger.warning(f"无法解析LLM返回的JSON: {str(e)}")
+                logger.debug(f"响应文本: {response_text[:500]}")
+                return {"has_data": False}
+                
+        except Exception as e:
+            logger.error(f"从表格来源提取数据失败: {str(e)}")
             return {"has_data": False}
     
     async def _recommend_chart_type(

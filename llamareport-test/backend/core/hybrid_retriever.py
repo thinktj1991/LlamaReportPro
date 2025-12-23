@@ -275,6 +275,64 @@ class HybridRetriever:
             logger.error(f"❌ 构建混合索引失败: {str(e)}")
             return False
     
+    def load_existing_index(self) -> bool:
+        """从现有的ChromaDB集合加载Hybrid Retriever索引"""
+        try:
+            logger.info("🔄 开始加载Hybrid Retriever索引...")
+            
+            # 检查集合是否有数据
+            text_count = self.text_collection.count() if self.text_collection else 0
+            table_count = self.table_collection.count() if self.table_collection else 0
+            
+            logger.info(f"📊 文本集合: {text_count} 个向量")
+            logger.info(f"📊 表格集合: {table_count} 个向量")
+            
+            if text_count == 0 and table_count == 0:
+                logger.warning("⚠️ Hybrid Retriever集合为空，无法加载索引")
+                return False
+            
+            # 加载文本索引
+            if text_count > 0:
+                try:
+                    from llama_index.vector_stores.chroma import ChromaVectorStore
+                    from llama_index.core import StorageContext
+                    
+                    text_vector_store = ChromaVectorStore(chroma_collection=self.text_collection)
+                    text_storage_context = StorageContext.from_defaults(vector_store=text_vector_store)
+                    self.text_index = VectorStoreIndex.from_vector_store(text_vector_store)
+                    logger.info(f"✅ 文本索引加载成功: {text_count} 个向量")
+                except Exception as e:
+                    logger.warning(f"⚠️ 文本索引加载失败: {str(e)}")
+                    self.text_index = None
+            
+            # 加载表格索引
+            if table_count > 0:
+                try:
+                    from llama_index.vector_stores.chroma import ChromaVectorStore
+                    from llama_index.core import StorageContext
+                    
+                    table_vector_store = ChromaVectorStore(chroma_collection=self.table_collection)
+                    table_storage_context = StorageContext.from_defaults(vector_store=table_vector_store)
+                    self.table_index = VectorStoreIndex.from_vector_store(table_vector_store)
+                    logger.info(f"✅ 表格索引加载成功: {table_count} 个向量")
+                except Exception as e:
+                    logger.warning(f"⚠️ 表格索引加载失败: {str(e)}")
+                    self.table_index = None
+            
+            # 至少有一个索引加载成功就算成功
+            if self.text_index or self.table_index:
+                logger.info("✅ Hybrid Retriever索引加载完成")
+                return True
+            else:
+                logger.warning("⚠️ Hybrid Retriever索引加载失败")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ 加载Hybrid Retriever索引失败: {str(e)}")
+            import traceback
+            logger.error(f"详细错误: {traceback.format_exc()}")
+            return False
+    
     def retrieve(self, query: str, top_k: int = 10, 
                 strategy: str = 'auto') -> List[Dict[str, Any]]:
         """混合检索"""
@@ -323,13 +381,24 @@ class HybridRetriever:
     
     def _determine_retrieval_strategy(self, query: str) -> str:
         """确定检索策略"""
+        # 明确的财务指标关键词（应该优先检索表格）
+        financial_indicator_keywords = [
+            '营业收入', '营收', '收入', '净利润', '利润', '资产', '负债', '现金流',
+            'ROE', 'ROA', '毛利率', '净利率', '总资产', '净资产', '股东权益',
+            '营业成本', '销售费用', '管理费用', '财务费用'
+        ]
+        
         # 数值类关键词
-        numeric_keywords = ['增长率', '变化幅度', '同比', '环比', '数据', '数值', '金额', '比例']
+        numeric_keywords = ['增长率', '变化幅度', '同比', '环比', '数据', '数值', '金额', '比例', '趋势']
         
         # 语义分析类关键词  
         semantic_keywords = ['表现如何', '趋势说明', '分析', '评价', '情况', '概述']
         
-        if any(keyword in query for keyword in numeric_keywords):
+        # 如果查询包含明确的财务指标，优先使用表格检索
+        if any(keyword in query for keyword in financial_indicator_keywords):
+            logger.info(f"📊 检测到财务指标关键词，使用表格优先检索策略")
+            return 'table_first'  # 表格优先
+        elif any(keyword in query for keyword in numeric_keywords):
             return 'table_first'  # 表格优先
         elif any(keyword in query for keyword in semantic_keywords):
             return 'text_first'   # 文本优先
