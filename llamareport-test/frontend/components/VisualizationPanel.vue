@@ -1,8 +1,106 @@
 <template>
-  <Card title="数据可视化" icon="📈" :status="status" empty-text="图表将在此显示">
+  <Card title="可视化视图" icon="📊" :status="status" empty-text="暂无可视化数据">
     <template #default>
-      <!-- 图表区域 -->
-      <div v-if="chartData && chartData.has_visualization" class="visualization-content">
+      <!-- 杜邦分析可视化 -->
+      <div v-if="dupontData && (dupontData.full_data || dupontData.roe)" class="dupont-visualization">
+        <div class="chart-header">
+          <h3>杜邦分析树状视图</h3>
+          <div v-if="dupontData.full_data" class="dupont-info">
+            <span>{{ dupontData.full_data.company_name || '未知公司' }} - {{ dupontData.full_data.report_year || '未知年份' }}</span>
+          </div>
+        </div>
+        
+        <!-- 树状结构视图 - 改进版杜邦分析图 -->
+        <div v-if="dupontData.full_data && dupontData.full_data.tree_structure" class="dupont-tree-view-enhanced">
+          <div class="dupont-diagram-container">
+            <svg class="dupont-connectors" v-if="dupontData.full_data.tree_structure">
+              <!-- SVG连接线将在JavaScript中动态生成 -->
+            </svg>
+            <DupontTreeNodeEnhanced :node="dupontData.full_data.tree_structure" :level="1" />
+          </div>
+        </div>
+        
+        <!-- 如果没有树状结构，使用层级视图 -->
+        <div v-else-if="dupontData.full_data" class="dupont-level-view">
+          <div class="level-section">
+            <h4>第一层：ROE分解</h4>
+            <div class="metrics-grid">
+              <div class="metric-card main">
+                <div class="metric-name">ROE (净资产收益率)</div>
+                <div class="metric-value">{{ getMetricValue(dupontData.full_data, 'level1', 'roe') }}</div>
+                <div class="metric-formula">{{ getMetricFormula(dupontData.full_data, 'level1', 'roe') }}</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="level-section">
+            <h4>第二层：ROA和权益乘数</h4>
+            <div class="metrics-grid">
+              <div class="metric-card">
+                <div class="metric-name">ROA (资产净利率)</div>
+                <div class="metric-value">{{ getMetricValue(dupontData.full_data, 'level1', 'roa') }}</div>
+                <div class="metric-formula">{{ getMetricFormula(dupontData.full_data, 'level1', 'roa') }}</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-name">权益乘数</div>
+                <div class="metric-value">{{ getMetricValue(dupontData.full_data, 'level1', 'equity_multiplier') }}</div>
+                <div class="metric-formula">{{ getMetricFormula(dupontData.full_data, 'level1', 'equity_multiplier') }}</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="level-section">
+            <h4>第三层：底层指标</h4>
+            <div class="metrics-grid">
+              <div class="metric-card">
+                <div class="metric-name">营业净利润率</div>
+                <div class="metric-value">{{ getMetricValue(dupontData.full_data, 'level2', 'net_profit_margin') }}</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-name">资产周转率</div>
+                <div class="metric-value">{{ getMetricValue(dupontData.full_data, 'level2', 'asset_turnover') }}</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-name">净利润</div>
+                <div class="metric-value">{{ getMetricValue(dupontData.full_data, 'level3', 'net_income') }}</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-name">营业收入</div>
+                <div class="metric-value">{{ getMetricValue(dupontData.full_data, 'level3', 'revenue') }}</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-name">总资产</div>
+                <div class="metric-value">{{ getMetricValue(dupontData.full_data, 'level2', 'total_assets') }}</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-name">股东权益</div>
+                <div class="metric-value">{{ getMetricValue(dupontData.full_data, 'level2', 'shareholders_equity') }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 简单视图（如果没有完整数据） -->
+        <div v-else class="dupont-tree">
+          <div class="dupont-item main">
+            <div class="dupont-label">ROE</div>
+            <div class="dupont-value">{{ dupontData.roe || '—' }}</div>
+          </div>
+          <div class="dupont-branches">
+            <div class="dupont-item">
+              <div class="dupont-label">ROA</div>
+              <div class="dupont-value">{{ dupontData.roa || '—' }}</div>
+            </div>
+            <div class="dupont-item">
+              <div class="dupont-label">权益乘数</div>
+              <div class="dupont-value">{{ dupontData.equity_multiplier || '—' }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- 普通数据可视化图表区域 -->
+      <div v-else-if="chartData && chartData.has_visualization" class="visualization-content">
         <div class="chart-header">
           <h3>📊 数据可视化 <span class="viz-badge">智能生成</span></h3>
           <div v-if="confidenceScore > 0" class="confidence-badge">
@@ -49,6 +147,11 @@
       <div v-else-if="chartData && !chartData.has_visualization" class="no-viz-message">
         <p>ℹ️ 此问题不包含可视化数据。尝试询问包含数值、趋势、对比等关键词的问题以获得图表展示。</p>
       </div>
+      
+      <!-- 完全空状态 -->
+      <div v-else class="no-viz-message">
+        <p>ℹ️ 暂无可视化数据。生成杜邦分析或进行包含数据的查询后，图表将在此显示。</p>
+      </div>
     </template>
   </Card>
 </template>
@@ -56,20 +159,96 @@
 <script>
 import Card from './Card.vue'
 
+// 递归树节点组件 - 原始版本（保留作为备用）
+const DupontTreeNode = {
+  name: 'DupontTreeNode',
+  props: {
+    node: { type: Object, required: true },
+    level: { type: Number, default: 1 }
+  },
+  template: `
+    <div class="tree-node" :class="'level-' + level">
+      <div class="node-content" :class="'level-' + level">
+        <div class="node-name">{{ node.name }}</div>
+        <div class="node-value">{{ node.formatted_value || node.value || '—' }}</div>
+        <div v-if="node.formula" class="node-formula">{{ node.formula }}</div>
+      </div>
+      <div v-if="node.children && node.children.length > 0" class="node-children">
+        <component 
+          v-for="(child, index) in node.children" 
+          :key="child.id || index"
+          :is="'DupontTreeNode'"
+          :node="child" 
+          :level="level + 1"
+        />
+      </div>
+    </div>
+  `
+}
+
+// 注册递归组件
+DupontTreeNode.components = { DupontTreeNode }
+
+// 改进版杜邦分析树节点组件 - 参考GitHub项目实现
+const DupontTreeNodeEnhanced = {
+  name: 'DupontTreeNodeEnhanced',
+  props: {
+    node: { type: Object, required: true },
+    level: { type: Number, default: 1 },
+    index: { type: Number, default: 0 },
+    total: { type: Number, default: 1 }
+  },
+  template: `
+    <div class="dupont-node-wrapper" :class="'level-' + level" :data-level="level" :data-index="index">
+      <div class="dupont-node" :class="'level-' + level">
+        <div class="dupont-node-header">
+          <div class="dupont-node-name">{{ node.name }}</div>
+        </div>
+        <div class="dupont-node-value">{{ node.formatted_value || node.value || '—' }}</div>
+        <div v-if="node.formula" class="dupont-node-formula">{{ node.formula }}</div>
+      </div>
+      <div v-if="node.children && node.children.length > 0" class="dupont-children-container">
+        <div class="dupont-children-row">
+          <component
+            v-for="(child, idx) in node.children"
+            :key="child.id || idx"
+            :is="'DupontTreeNodeEnhanced'"
+            :node="child"
+            :level="level + 1"
+            :index="idx"
+            :total="node.children.length"
+          />
+        </div>
+      </div>
+    </div>
+  `,
+  components: {}
+}
+
+// 注册递归组件
+DupontTreeNodeEnhanced.components = { DupontTreeNodeEnhanced }
+
 export default {
   name: 'VisualizationPanel',
   components: {
-    Card
+    Card,
+    DupontTreeNode,
+    DupontTreeNodeEnhanced
   },
   props: { 
     chartData: { type: Object, default: null }, 
+    dupontData: { type: Object, default: null },
     loading: { type: Boolean, default: false } 
   },
   computed: {
     status() {
       if (this.loading) return 'loading';
-      if (!this.chartData || !this.chartData.has_visualization) return 'empty';
-      return 'content';
+      if (this.hasAnyVisualization) return 'content';
+      return 'empty';
+    },
+    hasAnyVisualization() {
+      return (this.chartData && this.chartData.has_visualization) || 
+             (this.dupontData && (this.dupontData.full_data || this.dupontData.roe));
     },
     hasInsights() {
       return this.chartData?.insights && this.chartData.insights.length > 0;
@@ -82,6 +261,76 @@ export default {
     }
   },
   methods: {
+    getMetricValue(data, level, metric) {
+      if (!data || !data[level] || !data[level][metric]) return '—'
+      const metricObj = data[level][metric]
+      return metricObj.formatted_value || metricObj.value || '—'
+    },
+    getMetricFormula(data, level, metric) {
+      if (!data || !data[level] || !data[level][metric]) return ''
+      const metricObj = data[level][metric]
+      return metricObj.formula || ''
+    },
+    renderDupontChart() {
+      if (!this.dupontData?.full_data || !window.Plotly) {
+        return;
+      }
+      
+      this.$nextTick(() => {
+        try {
+          const dupontData = this.dupontData.full_data;
+          const level1 = dupontData.level1 || {};
+          
+          // 创建简单的柱状图显示关键指标
+          const metrics = {
+            'ROE': parseFloat(level1.roe?.value || 0) * 100,
+            'ROA': parseFloat(level1.roa?.value || 0) * 100,
+            '权益乘数': parseFloat(level1.equity_multiplier?.value || 0)
+          };
+          
+          const trace = {
+            type: 'bar',
+            x: Object.keys(metrics),
+            y: Object.values(metrics),
+            marker: {
+              color: ['#4facfe', '#00f2fe', '#43e97b'],
+              line: { color: 'white', width: 1 }
+            },
+            text: Object.values(metrics).map((v, i) => {
+              const key = Object.keys(metrics)[i];
+              return v.toFixed(2) + (key === '权益乘数' ? '' : '%');
+            }),
+            textposition: 'outside'
+          };
+          
+          const layout = {
+            title: {
+              text: '杜邦分析关键指标',
+              font: { size: 16, color: '#333' }
+            },
+            xaxis: { title: '指标', gridcolor: '#e0e0e0' },
+            yaxis: { title: '数值', gridcolor: '#e0e0e0' },
+            height: 400,
+            margin: { t: 60, r: 40, b: 60, l: 60 },
+            paper_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(0,0,0,0)',
+            showlegend: false
+          };
+          
+          const config = {
+            responsive: true,
+            displayModeBar: true,
+            displaylogo: false
+          };
+          
+          if (window.Plotly && window.Plotly.newPlot) {
+            window.Plotly.newPlot('dupontChart', [trace], layout, config);
+          }
+        } catch (error) {
+          console.error('渲染杜邦分析图表失败:', error);
+        }
+      });
+    },
     renderChart() {
       if (!this.chartData?.chart_config || !window.Plotly) {
         if (!window.Plotly) {
@@ -149,7 +398,8 @@ export default {
           console.error('渲染图表失败:', error);
           const chartDiv = document.getElementById('visualizationChart');
           if (chartDiv) {
-            chartDiv.innerHTML = `<div class="error-message"><p>图表渲染失败: ${error.message}</p></div>`;
+            const errorMsg = error.message || '未知错误';
+            chartDiv.innerHTML = '<div class="error-message"><p>图表渲染失败: ' + errorMsg + '</p></div>';
           }
         }
       });
@@ -192,8 +442,17 @@ export default {
         }
       }, 
       deep: true 
+    },
+    dupontData: {
+      handler() {
+        if (this.dupontData && this.dupontData.full_data) {
+          this.renderDupontChart();
+        }
+      },
+      deep: true
     }
   }
 }
 </script>
+
 

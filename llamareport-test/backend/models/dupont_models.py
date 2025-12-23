@@ -9,6 +9,56 @@ from decimal import Decimal
 from datetime import datetime
 
 
+# ==================== 财务数据提取模型 ====================
+
+class FinancialDataExtraction(BaseModel):
+    """财务数据提取模型（用于结构化输出）"""
+    净利润: Optional[float] = Field(default=None, description="净利润（归属于母公司所有者的净利润），单位：元")
+    营业收入: Optional[float] = Field(default=None, description="营业收入（营业总收入），单位：元")
+    总资产: Optional[float] = Field(default=None, description="总资产（资产总计），单位：元")
+    股东权益: Optional[float] = Field(default=None, description="股东权益（归属于母公司所有者权益），单位：元")
+    流动资产: Optional[float] = Field(default=None, description="流动资产（流动资产合计），单位：元")
+    非流动资产: Optional[float] = Field(default=None, description="非流动资产（非流动资产合计），单位：元")
+    营业利润: Optional[float] = Field(default=None, description="营业利润，单位：元（可选）")
+    总负债: Optional[float] = Field(default=None, description="总负债（负债合计），单位：元（可选）")
+    
+    @field_validator('*', mode='before')
+    @classmethod
+    def convert_numeric_strings(cls, v):
+        """将字符串数值转换为float"""
+        if v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            # 移除单位并转换
+            v = v.replace(',', '').replace('元', '').strip()
+            # 处理单位
+            if '万亿' in v or '万亿元' in v:
+                multiplier = 1000000000000
+                v = v.replace('万亿', '').replace('万亿元', '')
+            elif '千亿' in v or '千亿元' in v:
+                multiplier = 100000000000
+                v = v.replace('千亿', '').replace('千亿元', '')
+            elif '亿' in v or '亿元' in v:
+                multiplier = 100000000
+                v = v.replace('亿', '').replace('亿元', '')
+            elif '千万' in v or '千万元' in v:
+                multiplier = 10000000
+                v = v.replace('千万', '').replace('千万元', '')
+            elif '万' in v or '万元' in v:
+                multiplier = 10000
+                v = v.replace('万', '').replace('万元', '')
+            else:
+                multiplier = 1
+            
+            try:
+                return float(v) * multiplier
+            except ValueError:
+                return None
+        return v
+
+
 # ==================== 杜邦分析核心模型 ====================
 
 class DupontMetric(BaseModel):

@@ -36,7 +36,7 @@ class TableExtractor:
     
     def extract_tables(self, processed_documents: Dict[str, Any]) -> Dict[str, List[Dict]]:
         """
-        从处理过的文档中提取表格
+        从处理过的文档中提取表格（支持PDF和Excel）
         
         Args:
             processed_documents: 处理过的文档字典
@@ -50,8 +50,63 @@ class TableExtractor:
             try:
                 doc_tables = []
                 
-                # 从详细内容中提取表格
-                if 'detailed_content' in doc_data:
+                # 检查是否是Excel文件
+                # 方法1: 检查processing_method
+                file_type = doc_data.get('processing_method', '')
+                # 方法2: 检查documents中的metadata
+                is_excel_file = False
+                documents = doc_data.get('documents', [])
+                if documents:
+                    first_doc = documents[0]
+                    if hasattr(first_doc, 'metadata'):
+                        is_excel_file = first_doc.metadata.get('file_type') == 'excel'
+                    elif isinstance(first_doc, dict):
+                        is_excel_file = first_doc.get('metadata', {}).get('file_type') == 'excel'
+                
+                if 'excel' in file_type.lower() or is_excel_file:
+                    # Excel文件：从documents中提取表格
+                    # Excel文件的每个工作表已经转换为Document，我们需要将其转换为表格格式
+                    logger.info(f"检测到Excel文件: {doc_name}，开始提取表格...")
+                    for idx, doc in enumerate(documents):
+                        try:
+                            # 处理Document对象或字典
+                            if hasattr(doc, 'metadata'):
+                                metadata = doc.metadata
+                                text = doc.text
+                            elif isinstance(doc, dict):
+                                metadata = doc.get('metadata', {})
+                                text = doc.get('text', '')
+                            else:
+                                continue
+                            
+                            if metadata.get('file_type') == 'excel':
+                                sheet_name = metadata.get('sheet_name', f'Sheet{idx+1}')
+                                sheet_num = idx + 1
+                                
+                                # 将Document文本解析为表格数据
+                                table_data = self._parse_excel_sheet_to_table(text, sheet_name)
+                                if table_data and len(table_data) > 1:
+                                    processed_table = self._process_table(
+                                        table_data,
+                                        doc_name,
+                                        sheet_num,  # 使用工作表编号作为page_number
+                                        f"sheet_{sheet_num}_{sheet_name.replace(' ', '_')}"
+                                    )
+                                    if processed_table:
+                                        # 添加Excel特有的元数据
+                                        processed_table['sheet_name'] = sheet_name
+                                        processed_table['is_excel_table'] = True
+                                        if metadata.get('is_financial_statement'):
+                                            processed_table['is_financial'] = True
+                                            processed_table['financial_statement_type'] = metadata.get('financial_statement_type')
+                                        doc_tables.append(processed_table)
+                                        logger.info(f"  ✅ 从工作表 {sheet_name} 提取了1个表格")
+                        except Exception as e:
+                            logger.warning(f"处理Excel工作表失败: {str(e)}")
+                            continue
+                
+                # PDF文件：从详细内容中提取表格
+                elif 'detailed_content' in doc_data:
                     for page in doc_data['detailed_content']['pages']:
                         if 'tables' in page and isinstance(page['tables'], list):
                             for table_info in page['tables']:
@@ -69,9 +124,54 @@ class TableExtractor:
                 
             except Exception as e:
                 logger.error(f"从 {doc_name} 提取表格失败: {str(e)}")
+                import traceback
+                logger.error(f"详细错误: {traceback.format_exc()}")
                 all_tables[doc_name] = []
         
         return all_tables
+    
+    def _parse_excel_sheet_to_table(self, text: str, sheet_name: str) -> Optional[List[List]]:
+        """
+        将Excel工作表的文本格式解析为表格数据
+        
+        Args:
+            text: 工作表文本内容（包含 | 分隔的表格行）
+            sheet_name: 工作表名称
+            
+        Returns:
+            表格数据（二维列表）或None
+        """
+        try:
+            lines = text.split('\n')
+            table_rows = []
+            
+            for line in lines:
+                line = line.strip()
+                # 跳过标题和空行
+                if not line or line.startswith('【') or line.startswith('工作表:') or line.startswith('表格内容') or line.startswith('-'):
+                    continue
+                
+                # 检查是否是表格行（包含 | 分隔符）
+                if '|' in line:
+                    # 分割单元格
+                    cells = [cell.strip() for cell in line.split('|')]
+                    # 移除首尾空元素
+                    if len(cells) > 2:
+                        cells = cells[1:-1]
+                    elif len(cells) == 2:
+                        cells = [cells[0] if cells[0] else cells[1]]
+                    
+                    if cells and any(cell for cell in cells):
+                        table_rows.append(cells)
+            
+            if len(table_rows) > 1:  # 至少需要表头和数据行
+                return table_rows
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"解析Excel工作表 {sheet_name} 失败: {str(e)}")
+            return None
     
     def _process_table(self, raw_table: List[List], doc_name: str, page_num: int, table_id: str) -> Optional[Dict]:
         """

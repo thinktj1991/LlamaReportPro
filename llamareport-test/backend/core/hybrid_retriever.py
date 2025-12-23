@@ -47,6 +47,9 @@ class HybridRetrievalScorer:
                                     query: str, 
                                     document: Document, 
                                     semantic_score: float) -> Dict[str, Any]:
+        """
+        计算综合评分，财务报表文档会获得额外加分
+        """
         """计算综合评分"""
         
         # 1. 语义相似度 (sim_score)
@@ -58,18 +61,41 @@ class HybridRetrievalScorer:
         # 3. 年份一致性 (year_score)
         year_score = self._calculate_year_score(query, document)
         
-        # 4. 综合评分
-        comprehensive_score = (
+        # 4. 财务报表加分（如果文档是财务报表，给予额外权重）
+        financial_statement_bonus = 0.0
+        if document.metadata.get('is_financial_statement', False):
+            financial_statement_bonus = 0.2  # 财务报表额外加分20%
+            # 如果查询包含财务报表相关关键词，额外加分
+            query_lower = query.lower()
+            statement_type = document.metadata.get('financial_statement_type', '')
+            if statement_type:
+                type_keywords = {
+                    '利润表': ['利润', '收入', '成本', 'profit', 'revenue', 'income'],
+                    '资产负债表': ['资产', '负债', '权益', 'asset', 'liability', 'equity'],
+                    '现金流量表': ['现金流', '现金', 'cash flow', 'cash']
+                }
+                if statement_type in type_keywords:
+                    for keyword in type_keywords[statement_type]:
+                        if keyword in query_lower:
+                            financial_statement_bonus = 0.3  # 匹配时额外加分30%
+                            break
+        
+        # 5. 计算综合评分（财务报表会获得额外加分）
+        base_score = (
             sim_score * self.weights['semantic_similarity'] +
             metric_score * self.weights['metric_matching'] +
             year_score * self.weights['year_consistency']
         )
+        
+        # 应用财务报表加分（但不超过1.0）
+        comprehensive_score = min(1.0, base_score + financial_statement_bonus)
         
         return {
             'comprehensive_score': comprehensive_score,
             'sim_score': sim_score,
             'metric_score': metric_score,
             'year_score': year_score,
+            'financial_statement_bonus': financial_statement_bonus,
             'weights': self.weights
         }
     

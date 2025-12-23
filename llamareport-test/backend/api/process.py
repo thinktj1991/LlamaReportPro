@@ -79,15 +79,16 @@ async def process_file(request: ProcessRequest):
         processed_docs = {filename: doc_result}
         extracted_tables = table_extractor.extract_tables(processed_docs)
         
-        # 构建索引（如果需要）
+        # 构建索引（如果需要，默认使用增量模式）
         index_built = False
         if build_index:
             try:
-                logger.info("🔨 开始构建索引...")
+                logger.info("🔨 开始构建索引（增量模式）...")
                 logger.info(f"   文档数: {len(processed_docs)}")
                 logger.info(f"   表格数: {sum(len(tables) for tables in extracted_tables.values())}")
                 
-                index_built = rag_engine.build_index(processed_docs, extracted_tables)
+                # 默认使用增量模式，只索引新文件，保留已有索引
+                index_built = rag_engine.build_index(processed_docs, extracted_tables, incremental=True)
                 
                 if index_built:
                     index_stats = rag_engine.get_index_stats()
@@ -104,7 +105,7 @@ async def process_file(request: ProcessRequest):
                 # 不抛出异常，但记录详细错误
         
         # 生成处理摘要
-        doc_summary = document_processor.get_document_summary(doc_result['documents'])
+        doc_summary = document_processor.get_document_summary(doc_result.get('documents', []))
         table_stats = table_extractor.get_table_statistics(extracted_tables)
 
         # 将Document对象转换为可序列化的字典
@@ -112,26 +113,38 @@ async def process_file(request: ProcessRequest):
             'filename': doc_result['filename'],
             'documents': [
                 {
-                    'doc_id': doc.doc_id,
+                    'doc_id': doc.doc_id if hasattr(doc, 'doc_id') else None,
                     'text': doc.text[:500] + "..." if len(doc.text) > 500 else doc.text,  # 截断长文本
-                    'metadata': doc.metadata,
-                    'text_length': len(doc.text)
-                } for doc in doc_result['documents']
+                    'metadata': doc.metadata if hasattr(doc, 'metadata') else {},
+                    'text_length': len(doc.text) if hasattr(doc, 'text') else 0
+                } for doc in doc_result.get('documents', [])
             ],
-            'detailed_content': doc_result['detailed_content'],
-            'page_count': doc_result['page_count'],
-            'total_text_length': doc_result['total_text_length'],
-            'processing_method': doc_result['processing_method']
+            'page_count': doc_result.get('page_count', 0),
+            'total_text_length': doc_result.get('total_text_length', 0),
+            'processing_method': doc_result.get('processing_method', 'unknown')
         }
+        
+        # 只有PDF文件才有detailed_content
+        if 'detailed_content' in doc_result:
+            serializable_doc_result['detailed_content'] = doc_result['detailed_content']
+        
+        # Excel文件可能有sheet_count
+        if 'sheet_count' in doc_result:
+            serializable_doc_result['sheet_count'] = doc_result['sheet_count']
 
+        # 确定page_count（Excel文件使用sheet_count）
+        page_count = doc_result.get('page_count', 0)
+        if 'sheet_count' in doc_result:
+            page_count = doc_result.get('sheet_count', 0)
+        
         result = {
             "message": "文件处理完成",
             "filename": filename,
             "processing_summary": {
                 "document_info": {
-                    "page_count": doc_result['page_count'],
-                    "total_text_length": doc_result['total_text_length'],
-                    "processing_method": doc_result['processing_method']
+                    "page_count": page_count,
+                    "total_text_length": doc_result.get('total_text_length', 0),
+                    "processing_method": doc_result.get('processing_method', 'unknown')
                 },
                 "document_summary": doc_summary,
                 "table_info": {
@@ -162,7 +175,7 @@ async def process_file(request: ProcessRequest):
 @router.post("/files")
 async def process_multiple_files(request: ProcessMultipleRequest):
     """
-    处理多个文件
+    处理多个文件（支持PDF和Excel）
     
     Args:
         request: 批量处理请求
@@ -171,6 +184,9 @@ async def process_multiple_files(request: ProcessMultipleRequest):
         批量处理结果
     """
     try:
+        # 获取处理器实例
+        document_processor, table_extractor, rag_engine = get_processors()
+        
         filenames = request.filenames
         build_index = request.build_index
         
@@ -185,47 +201,75 @@ async def process_multiple_files(request: ProcessMultipleRequest):
         results = []
         all_processed_docs = {}
         all_extracted_tables = {}
+        failed_files = []
         
         # 处理每个文件
         for filename in filenames:
             try:
                 file_path = Path("uploads") / filename
                 if not file_path.exists():
+                    error_msg = f"文件不存在: {filename}"
                     results.append({
                         "filename": filename,
                         "status": "error",
-                        "message": f"文件不存在: {filename}"
+                        "message": error_msg
                     })
+                    failed_files.append({"filename": filename, "error": error_msg})
+                    logger.error(f"文件不存在: {filename}")
                     continue
                 
-                # 验证文件
+                # 检查文件扩展名
+                file_ext = file_path.suffix.lower()
+                if file_ext not in {'.pdf', '.xlsx', '.xls'}:
+                    error_msg = f"不支持的文件类型: {file_ext}"
+                    results.append({
+                        "filename": filename,
+                        "status": "error",
+                        "message": error_msg
+                    })
+                    failed_files.append({"filename": filename, "error": error_msg})
+                    logger.error(f"不支持的文件类型: {file_ext}")
+                    continue
+                
+                # 验证文件（对于PDF和Excel都支持）
                 if not document_processor.validate_file(str(file_path)):
+                    error_msg = f"文件验证失败: {filename}"
                     results.append({
                         "filename": filename,
                         "status": "error",
-                        "message": f"文件验证失败: {filename}"
+                        "message": error_msg
                     })
+                    failed_files.append({"filename": filename, "error": error_msg})
+                    logger.error(f"文件验证失败: {filename}")
                     continue
                 
-                # 处理文档
+                logger.info(f"开始处理文件: {filename} (类型: {file_ext})")
+                
+                # 处理文档（支持PDF和Excel）
                 doc_result = document_processor.process_file(str(file_path), filename)
                 all_processed_docs[filename] = doc_result
                 
-                # 提取表格
+                # 提取表格（Excel文件可能已经包含表格数据）
                 processed_docs = {filename: doc_result}
                 extracted_tables = table_extractor.extract_tables(processed_docs)
                 all_extracted_tables.update(extracted_tables)
                 
                 # 生成摘要
-                doc_summary = document_processor.get_document_summary(doc_result['documents'])
+                doc_summary = document_processor.get_document_summary(doc_result.get('documents', []))
                 table_stats = table_extractor.get_table_statistics(extracted_tables)
+                
+                # 对于Excel文件，page_count可能是sheet_count
+                page_count = doc_result.get('page_count', 0)
+                if file_ext in {'.xlsx', '.xls'}:
+                    # Excel文件使用sheet_count
+                    page_count = doc_result.get('sheet_count', 0)
                 
                 results.append({
                     "filename": filename,
                     "status": "success",
                     "summary": {
-                        "page_count": doc_result['page_count'],
-                        "total_text_length": doc_result['total_text_length'],
+                        "page_count": page_count,
+                        "total_text_length": doc_result.get('total_text_length', 0),
                         "table_count": table_stats['total_tables'],
                         "financial_tables": table_stats['financial_tables']
                     }
@@ -234,21 +278,40 @@ async def process_multiple_files(request: ProcessMultipleRequest):
                 logger.info(f"文件处理成功: {filename}")
                 
             except Exception as e:
+                error_msg = str(e)
                 results.append({
                     "filename": filename,
                     "status": "error",
-                    "message": str(e)
+                    "message": error_msg
                 })
-                logger.error(f"处理文件失败 {filename}: {str(e)}")
+                failed_files.append({"filename": filename, "error": error_msg})
+                logger.error(f"处理文件失败 {filename}: {error_msg}")
+                import traceback
+                logger.error(f"详细错误: {traceback.format_exc()}")
         
-        # 构建统一索引（如果需要）
+        # 构建统一索引（如果需要，使用增量模式）
         index_built = False
         if build_index and all_processed_docs:
             try:
-                index_built = rag_engine.build_index(all_processed_docs, all_extracted_tables)
-                logger.info(f"统一索引构建{'成功' if index_built else '失败'}")
+                logger.info("🔨 开始构建统一索引（增量模式）...")
+                logger.info(f"   文档数: {len(all_processed_docs)}")
+                logger.info(f"   表格数: {sum(len(tables) for tables in all_extracted_tables.values())}")
+                
+                # 使用增量模式，只索引新文件，保留已有索引
+                index_built = rag_engine.build_index(all_processed_docs, all_extracted_tables, incremental=True)
+                
+                if index_built:
+                    index_stats = rag_engine.get_index_stats()
+                    logger.info(f"✅ 统一索引构建成功!")
+                    logger.info(f"   状态: {index_stats.get('status', 'unknown')}")
+                    logger.info(f"   文档数: {index_stats.get('document_count', 0)}")
+                    logger.info(f"   向量数: {index_stats.get('vector_count', 0)}")
+                else:
+                    logger.warning("⚠️ 统一索引构建失败")
             except Exception as e:
-                logger.warning(f"统一索引构建失败: {str(e)}")
+                logger.error(f"统一索引构建失败: {str(e)}")
+                import traceback
+                logger.error(f"详细错误: {traceback.format_exc()}")
         
         # 统计结果
         success_count = sum(1 for r in results if r["status"] == "success")
@@ -257,19 +320,34 @@ async def process_multiple_files(request: ProcessMultipleRequest):
         # 生成总体统计
         total_table_stats = table_extractor.get_table_statistics(all_extracted_tables)
         
+        # 计算总页数/工作表数
+        total_pages = sum(
+            r.get("summary", {}).get("page_count", 0) 
+            for r in results 
+            if r["status"] == "success"
+        )
+        
         result = {
             "message": f"批量处理完成: {success_count} 成功, {error_count} 失败",
             "total_files": len(results),
             "success_count": success_count,
             "error_count": error_count,
-            "overall_summary": {
-                "total_documents": len(all_processed_docs),
-                "total_tables": total_table_stats['total_tables'],
-                "financial_tables": total_table_stats['financial_tables'],
-                "index_built": index_built,
-                "index_stats": rag_engine.get_index_stats() if (index_built and rag_engine) else None
+            "processing_summary": {
+                "document_info": {
+                    "page_count": total_pages,
+                    "total_documents": len(all_processed_docs)
+                },
+                "table_info": {
+                    "total_tables": total_table_stats['total_tables'],
+                    "financial_tables": total_table_stats['financial_tables']
+                },
+                "index_info": {
+                    "index_built": index_built,
+                    "index_stats": rag_engine.get_index_stats() if (index_built and rag_engine) else None
+                }
             },
-            "file_results": results
+            "file_results": results,
+            "failed_files": failed_files
         }
         
         logger.info(f"批量处理完成: {success_count}/{len(filenames)} 成功")
@@ -342,7 +420,7 @@ async def get_processing_status():
             "system_status": "ready",
             "uploaded_files": uploaded_files,
             "index_status": index_stats,
-            "supported_formats": [".pdf"],
+            "supported_formats": [".pdf", ".xlsx", ".xls"],
             "max_file_size": "50MB",
             "max_batch_size": 10
         }

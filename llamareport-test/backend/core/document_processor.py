@@ -22,7 +22,7 @@ class DocumentProcessor:
     
     def process_file(self, file_path: str, filename: str) -> Dict[str, Any]:
         """
-        处理文件并提取内容
+        处理文件并提取内容（支持PDF和Excel）
         
         Args:
             file_path: 文件路径
@@ -35,32 +35,41 @@ class DocumentProcessor:
             if not Path(file_path).exists():
                 raise FileNotFoundError(f"文件不存在: {file_path}")
             
-            # 检查文件类型
-            if not filename.lower().endswith('.pdf'):
-                raise ValueError("目前只支持PDF文件")
+            file_ext = Path(filename).suffix.lower()
             
-            # 使用LlamaIndex提取文档
-            documents = self.pdf_reader.load_data(Path(file_path))
+            # 处理Excel文件
+            if file_ext in {'.xlsx', '.xls'}:
+                from core.excel_processor import ExcelProcessor
+                excel_processor = ExcelProcessor()
+                return excel_processor.process_excel_file(file_path, filename)
             
-            # 使用pdfplumber提取详细内容
-            detailed_content = self._extract_detailed_content(file_path)
-            
-            # 添加元数据
-            for i, doc in enumerate(documents):
-                doc.metadata.update({
+            # 处理PDF文件
+            if file_ext == '.pdf':
+                # 使用LlamaIndex提取文档
+                documents = self.pdf_reader.load_data(Path(file_path))
+                
+                # 使用pdfplumber提取详细内容
+                detailed_content = self._extract_detailed_content(file_path)
+                
+                # 添加元数据
+                for i, doc in enumerate(documents):
+                    doc.metadata.update({
+                        'filename': filename,
+                        'page_number': i + 1,
+                        'source': 'pdf_processor',
+                        'file_type': 'pdf'
+                    })
+                
+                result = {
                     'filename': filename,
-                    'page_number': i + 1,
-                    'source': 'pdf_processor'
-                })
-            
-            result = {
-                'filename': filename,
-                'documents': documents,
-                'detailed_content': detailed_content,
-                'page_count': len(detailed_content['pages']),
-                'total_text_length': sum(len(doc.text) for doc in documents),
-                'processing_method': 'simple_pdf_processor'
-            }
+                    'documents': documents,
+                    'detailed_content': detailed_content,
+                    'page_count': len(detailed_content['pages']),
+                    'total_text_length': sum(len(doc.text) for doc in documents),
+                    'processing_method': 'simple_pdf_processor'
+                }
+            else:
+                raise ValueError(f"不支持的文件类型: {file_ext}")
             
             # 🔍 打印处理结果的JSON结构
             import json
@@ -199,6 +208,59 @@ class DocumentProcessor:
     
     def validate_file(self, file_path: str, max_size: int = 50 * 1024 * 1024) -> bool:
         """
+        验证文件是否有效（支持PDF和Excel）
+        
+        Args:
+            file_path: 文件路径
+            max_size: 最大文件大小（字节）
+            
+        Returns:
+            是否有效
+        """
+        try:
+            path = Path(file_path)
+            if not path.exists():
+                return False
+            
+            file_ext = path.suffix.lower()
+            # 支持PDF和Excel文件
+            if file_ext not in {'.pdf', '.xlsx', '.xls'}:
+                logger.warning(f"不支持的文件类型: {file_ext}")
+                return False
+            
+            # 检查文件大小
+            if path.stat().st_size > max_size:
+                logger.warning(f"文件过大: {path.stat().st_size} bytes")
+                return False
+            
+            # 对于Excel文件，尝试打开验证
+            if file_ext in {'.xlsx', '.xls'}:
+                try:
+                    from core.excel_processor import ExcelProcessor
+                    excel_processor = ExcelProcessor()
+                    if excel_processor.validate_file(str(path)):
+                        return True
+                except Exception as e:
+                    logger.warning(f"Excel文件验证失败: {str(e)}")
+                    return False
+            
+            # 对于PDF文件，检查是否是有效的PDF
+            if file_ext == '.pdf':
+                try:
+                    import pdfplumber
+                    with pdfplumber.open(str(path)) as pdf:
+                        if len(pdf.pages) == 0:
+                            return False
+                except Exception as e:
+                    logger.warning(f"PDF文件验证失败: {str(e)}")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"文件验证异常: {str(e)}")
+            return False
+        """
         验证文件
         
         Args:
@@ -222,10 +284,22 @@ class DocumentProcessor:
                 logger.error(f"文件过大: {file_size} > {max_size}")
                 return False
             
-            # 检查文件扩展名
-            if not path.suffix.lower() == '.pdf':
-                logger.error(f"不支持的文件类型: {path.suffix}")
+            # 检查文件扩展名（支持PDF和Excel）
+            file_ext = path.suffix.lower()
+            if file_ext not in {'.pdf', '.xlsx', '.xls'}:
+                logger.error(f"不支持的文件类型: {file_ext}")
                 return False
+            
+            # 对于Excel文件，尝试打开验证
+            if file_ext in {'.xlsx', '.xls'}:
+                try:
+                    from core.excel_processor import ExcelProcessor
+                    excel_processor = ExcelProcessor()
+                    if excel_processor.validate_file(str(path)):
+                        return True
+                except Exception as e:
+                    logger.warning(f"Excel文件验证失败: {str(e)}")
+                    return False
             
             return True
             

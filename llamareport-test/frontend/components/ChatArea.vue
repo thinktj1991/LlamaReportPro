@@ -4,12 +4,23 @@
       <div class="chat-container">
         <div class="chat-mode-selector">
           <button :class="['mode-btn', { active: queryMode === 'normal' }]" @click="queryMode = 'normal'">普通查询</button>
+          <button :class="['mode-btn', { active: queryMode === 'dupont' }]" @click="handleDupontAnalysis">杜邦分析</button>
           <button :class="['mode-btn', { active: queryMode === 'agent' }]" @click="queryMode = 'agent'">Agent分析</button>
         </div>
         <div class="chat-messages" ref="messagesContainer">
-          <div v-for="(msg, index) in messages" :key="index" :class="['chat-message', msg.type]">
-            <div v-if="msg.type === 'user'" class="message-content">{{ msg.content }}</div>
-            <div v-else class="message-content" v-html="parseMarkdown(msg.content)"></div>
+          <div v-for="(msg, index) in messages" :key="index" :class="['chat-message', msg.type, { 'processing-summary': isProcessingSummary(msg.content) }]" @mouseenter="hoveredMessageIndex = index" @mouseleave="hoveredMessageIndex = null">
+            <div class="message-content-wrapper">
+              <button 
+                v-if="hoveredMessageIndex === index" 
+                class="message-delete-btn" 
+                @click.stop="deleteMessage(index)" 
+                title="删除消息"
+              >
+                ×
+              </button>
+              <div v-if="msg.type === 'user'" class="message-content">{{ msg.content }}</div>
+              <div v-else class="message-content" v-html="parseMarkdown(msg.content)"></div>
+            </div>
             <div v-if="msg.sources && msg.sources.length > 0" class="message-sources">
               <div v-for="(source, idx) in msg.sources" :key="idx" class="source-item">{{ source.text.substring(0, 100) }}...</div>
             </div>
@@ -72,12 +83,13 @@ export default {
     loading: { type: Boolean, default: false },
     suggestions: { type: Array, default: () => [] }
   },
-  emits: ['send-message', 'clear-chat', 'agent-query', 'get-suggestions'],
+  emits: ['send-message', 'clear-chat', 'agent-query', 'dupont-analysis', 'get-suggestions', 'delete-message'],
   data() { 
     return { 
       inputText: '', 
       queryMode: 'normal',
-      showSuggestions: false
+      showSuggestions: false,
+      hoveredMessageIndex: null
     }; 
   },
   methods: {
@@ -107,6 +119,17 @@ export default {
     },
     parseMarkdown(text) { 
       return typeof marked !== 'undefined' ? marked.parse(text) : text; 
+    },
+    deleteMessage(index) {
+      this.$emit('delete-message', index);
+    },
+    handleDupontAnalysis() {
+      this.$emit('dupont-analysis');
+    },
+    isProcessingSummary(content) {
+      if (!content) return false;
+      const text = typeof content === 'string' ? content : '';
+      return text.includes('批量处理完成') || text.includes('处理成功的文件') || text.includes('处理失败');
     }
   },
   watch: {

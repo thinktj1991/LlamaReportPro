@@ -192,13 +192,14 @@ class RAGEngine:
             logger.error(f"详细错误: {traceback.format_exc()}")
             return False
     
-    def build_index(self, processed_documents: Dict[str, Any], extracted_tables: Dict[str, List[Dict]] = None) -> bool:
+    def build_index(self, processed_documents: Dict[str, Any], extracted_tables: Dict[str, List[Dict]] = None, incremental: bool = True) -> bool:
         """
-        构建向量索引
+        构建向量索引（支持增量更新）
 
         Args:
             processed_documents: 处理过的文档
             extracted_tables: 提取的表格（可选）
+            incremental: 是否使用增量更新模式（默认True，只添加新文件，保留已有索引）
 
         Returns:
             是否成功构建索引
@@ -208,16 +209,50 @@ class RAGEngine:
             return False
 
         try:
-            all_documents = []
-            
             # 🔍 打印索引构建开始信息
             print("\n" + "=" * 80)
-            print("🚀 开始构建RAG索引")
+            print("🚀 开始构建RAG索引" + ("（增量模式）" if incremental else "（重建模式）"))
             print("=" * 80)
+            
+            # 检查已索引的文件（增量模式下）
+            indexed_files = set()
+            if incremental and self.chroma_collection:
+                try:
+                    # 获取所有已索引的文档，提取source_file元数据
+                    existing_data = self.chroma_collection.get()
+                    if existing_data and 'metadatas' in existing_data:
+                        for metadata in existing_data.get('metadatas', []):
+                            if metadata and 'source_file' in metadata:
+                                indexed_files.add(metadata['source_file'])
+                    if indexed_files:
+                        logger.info(f"📋 已索引的文件: {', '.join(indexed_files)}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 检查已索引文件失败: {str(e)}，将重新构建索引")
+                    indexed_files = set()
+            
+            # 确定需要索引的文件（增量模式下，只索引新文件）
+            files_to_index = set(processed_documents.keys())
+            if incremental:
+                new_files = files_to_index - indexed_files
+                if new_files:
+                    logger.info(f"📝 新文件需要索引: {', '.join(new_files)}")
+                else:
+                    logger.info("✅ 所有文件已索引，跳过索引构建")
+                    # 如果所有文件都已索引，尝试加载现有索引
+                    if not self.index:
+                        return self.load_existing_index()
+                    return True
+                # 只处理新文件
+                processed_documents = {k: v for k, v in processed_documents.items() if k in new_files}
+                if extracted_tables:
+                    extracted_tables = {k: v for k, v in extracted_tables.items() if k in new_files}
+            
+            all_documents = []
             
             # 处理文本文档
             print("📄 处理文本文档:")
             text_doc_count = 0
+            financial_statement_count = 0
             for doc_name, doc_data in processed_documents.items():
                 if 'documents' in doc_data:
                     print(f"  - {doc_name}: {len(doc_data['documents'])}个文档片段")
@@ -227,8 +262,20 @@ class RAGEngine:
                             'source_file': doc_name,
                             'document_type': 'text_content'
                         })
+                        
+                        # 如果是财务报表，添加优先级标记
+                        if doc.metadata.get('is_financial_statement', False):
+                            doc.metadata['priority'] = 'high'
+                            doc.metadata['financial_statement_type'] = doc.metadata.get('financial_statement_type', 'unknown')
+                            financial_statement_count += 1
+                            # 在文本前添加标记，提高检索权重
+                            doc.text = f"[财务报表-{doc.metadata.get('financial_statement_type', 'unknown')}] {doc.text}"
+                        
                         all_documents.append(doc)
                         text_doc_count += 1
+            
+            if financial_statement_count > 0:
+                print(f"  📊 财务报表数量: {financial_statement_count}")
             
             print(f"  📊 文本文档总数: {text_doc_count}")
             
@@ -268,11 +315,14 @@ class RAGEngine:
                 print("\n📊 表格数据: 无")
             
             if not all_documents:
-                logger.warning("没有文档可以索引")
-                return False
+                logger.warning("没有新文档需要索引")
+                # 如果没有新文档，尝试加载现有索引
+                if not self.index:
+                    return self.load_existing_index()
+                return True
             
             print(f"\n📈 索引统计:")
-            print(f"  - 总文档数: {len(all_documents)}")
+            print(f"  - 新文档数: {len(all_documents)}")
             print(f"  - 文本文档: {text_doc_count}")
             print(f"  - 表格文档: {table_doc_count}")
             
@@ -288,12 +338,18 @@ class RAGEngine:
                 vector_store=vector_store
             )
             
-            # 构建索引
-            print(f"🔧 构建向量索引...")
-            self.index = VectorStoreIndex.from_documents(
-                all_documents,
-                storage_context=storage_context
-            )
+            # 构建索引（增量模式下，如果已有索引则添加文档，否则新建）
+            print(f"🔧 {'添加文档到索引' if incremental and self.index else '构建向量索引'}...")
+            if incremental and self.index:
+                # 增量模式：添加新文档到现有索引
+                for doc in all_documents:
+                    self.index.insert(doc)
+            else:
+                # 新建索引
+                self.index = VectorStoreIndex.from_documents(
+                    all_documents,
+                    storage_context=storage_context
+                )
             
             # 创建查询引擎 - 优化配置
             print(f"🔧 创建查询引擎...")
@@ -715,6 +771,63 @@ class RAGEngine:
         except Exception as e:
             logger.error(f"获取索引统计失败: {str(e)}")
             return {'status': 'error', 'error': str(e)}
+    
+    def remove_file_from_index(self, filename: str) -> bool:
+        """
+        从索引中删除指定文件的所有文档
+        
+        Args:
+            filename: 要删除的文件名
+            
+        Returns:
+            是否成功删除
+        """
+        try:
+            if not self.chroma_collection:
+                logger.warning("⚠️ ChromaDB集合未初始化，无法删除文件索引")
+                return False
+            
+            # 获取所有文档的ID和元数据
+            existing_data = self.chroma_collection.get()
+            if not existing_data or 'ids' not in existing_data:
+                logger.warning(f"⚠️ 索引中没有找到文件: {filename}")
+                return False
+            
+            # 找到属于该文件的所有文档ID
+            ids_to_delete = []
+            metadatas = existing_data.get('metadatas', [])
+            ids = existing_data.get('ids', [])
+            
+            for i, metadata in enumerate(metadatas):
+                if metadata and metadata.get('source_file') == filename:
+                    ids_to_delete.append(ids[i])
+            
+            if not ids_to_delete:
+                logger.info(f"ℹ️ 索引中没有找到文件 {filename} 的文档")
+                return True
+            
+            # 删除这些文档
+            self.chroma_collection.delete(ids=ids_to_delete)
+            logger.info(f"✅ 从索引中删除了文件 {filename} 的 {len(ids_to_delete)} 个文档")
+            
+            # 如果索引已加载，需要重新加载以反映更改
+            if self.index:
+                try:
+                    # 重新加载索引
+                    self.load_existing_index()
+                except Exception as e:
+                    logger.warning(f"⚠️ 重新加载索引失败: {str(e)}")
+                    # 如果重新加载失败，清空索引对象，下次查询时会自动加载
+                    self.index = None
+                    self.query_engine = None
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ 删除文件索引失败: {str(e)}")
+            import traceback
+            logger.error(f"详细错误: {traceback.format_exc()}")
+            return False
     
     def clear_index(self) -> bool:
         """清空索引"""

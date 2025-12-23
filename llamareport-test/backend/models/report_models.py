@@ -214,3 +214,32 @@ class ReportSection(BaseModel):
     generation_time: float = Field(description="生成耗时(秒)")
     tokens_used: Optional[int] = Field(default=None, description="使用的token数")
 
+
+# ==================== 财务快照模型 ====================
+
+class KeyFinancialMetric(BaseModel):
+    """关键财务指标"""
+    name: str = Field(description="指标名称，如'营业收入'、'净利润'、'经营现金流'")
+    value: Optional[str] = Field(default=None, description="指标值，如'100亿元'、'10亿元'")
+    change_rate: Optional[str] = Field(default=None, description="同比变化率，如'+20%'、'-5%'")
+    change_direction: Optional[str] = Field(default=None, description="变化方向：'增长'、'下降'、'持平'")
+    is_missing: bool = Field(default=False, description="是否缺失该指标")
+
+
+class FinancialSnapshot(BaseModel):
+    """财务快照（用于企业概况）"""
+    # 核心指标
+    revenue: Optional[KeyFinancialMetric] = Field(default=None, description="营业收入")
+    net_profit: Optional[KeyFinancialMetric] = Field(default=None, description="净利润")
+    operating_cash_flow: Optional[KeyFinancialMetric] = Field(default=None, description="经营现金流")
+    asset_liability_ratio: Optional[KeyFinancialMetric] = Field(default=None, description="资产负债率")
+    
+    # 一句话结论
+    verdict: str = Field(description="一句话核心结论")
+    stage: Optional[str] = Field(default=None, description="公司阶段：增长/稳态/下行")
+    profit_quality: Optional[str] = Field(default=None, description="赚钱质量描述")
+    risk_level: Optional[str] = Field(default=None, description="风险级别：低/中/高")
+    
+    # 缺失字段
+    missing_fields: List[str] = Field(default_factory=list, description="缺失的字段列表")
+

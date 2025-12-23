@@ -353,3 +353,164 @@ async def submit_feedback(feedback_data: Dict[str, Any]):
     except Exception as e:
         logger.error(f"提交反馈失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"提交反馈失败: {str(e)}")
+
+@router.post("/quick-overview")
+async def get_quick_overview():
+    """
+    快速生成企业概况接口
+    
+    从文档中快速提取关键信息，生成简洁但全面的企业概况
+    要求速度快，缺失字段不报错，用"—"或灰色显示
+    
+    Returns:
+        企业概况数据，包含：
+        - 核心指标（规模与增长、利润、现金流）
+        - 业务结构（Top3业务+占比）
+        - 盈利&安全指标（GM/NM/ROE/负债率）
+        - Highlights和Risks（chips列表）
+        - 缺失字段列表
+    """
+    try:
+        from llama_index.core.llms import ChatMessage
+        from llama_index.core import Settings
+        from pydantic import BaseModel, Field
+        from typing import Optional, List
+        
+        # 定义快速概况的数据模型
+        class QuickOverviewModel(BaseModel):
+            """快速概况数据模型"""
+            # 核心指标
+            revenue: Optional[str] = Field(default=None, description="营业收入，如'6.73亿元'")
+            revenue_yoy: Optional[str] = Field(default=None, description="营收同比增长率，如'14.53%'")
+            net_profit: Optional[str] = Field(default=None, description="净利润，如'1.2亿元'")
+            net_profit_yoy: Optional[str] = Field(default=None, description="净利润同比增长率，如'10.5%'")
+            operating_cfo: Optional[str] = Field(default=None, description="经营活动现金流量净额，如'2.5亿元'")
+            operating_cfo_yoy: Optional[str] = Field(default=None, description="经营现金流同比增长率，如'8.3%'")
+            
+            # 业务结构
+            top3_business: Optional[List[Dict[str, str]]] = Field(default=None, description="Top3业务，格式：[{'name': '业务名', 'revenue': '收入', 'ratio': '占比'}]")
+            
+            # 盈利&安全指标
+            gross_margin: Optional[str] = Field(default=None, description="毛利率，如'45.2%'")
+            net_margin: Optional[str] = Field(default=None, description="净利率，如'18.5%'")
+            roe: Optional[str] = Field(default=None, description="ROE，如'12.3%'")
+            debt_ratio: Optional[str] = Field(default=None, description="负债率，如'35.6%'")
+            
+            # Highlights和Risks
+            highlights: Optional[List[str]] = Field(default=None, description="业务亮点列表")
+            risks: Optional[List[str]] = Field(default=None, description="风险因素列表")
+            
+            # 缺失字段提示
+            missing_fields: Optional[List[str]] = Field(default=None, description="缺失的字段列表，用于前端显示提示")
+        
+        logger.info("开始生成快速企业概况...")
+        
+        # 获取RAG引擎
+        rag_engine = get_rag_engine()
+        
+        if not rag_engine.query_engine:
+            # 尝试加载现有索引
+            if not rag_engine.load_existing_index():
+                raise HTTPException(
+                    status_code=400,
+                    detail="索引未构建，请先处理文档"
+                )
+        
+        # 构建快速查询提示词
+        quick_query = """
+请从文档中快速提取以下关键信息，如果某个信息缺失，请设置为null，不要报错：
+
+1. 核心指标：
+   - 营业收入及同比增长率
+   - 净利润及同比增长率
+   - 经营活动现金流量净额及同比增长率
+
+2. 业务结构：
+   - Top3业务板块及其收入和占比
+
+3. 盈利&安全指标：
+   - 毛利率(GM)
+   - 净利率(NM)
+   - ROE
+   - 负债率
+
+4. 业务亮点和风险：
+   - 3-5个主要业务亮点
+   - 3-5个主要风险因素
+
+请以JSON格式输出，缺失的字段设置为null。要求快速响应，优先提取明确的数据。
+"""
+        
+        # 使用RAG查询获取上下文
+        context_result = rag_engine.query(quick_query)
+        context_text = context_result.get('answer', '')
+        
+        # 使用结构化LLM生成概况
+        llm = Settings.llm
+        sllm = llm.as_structured_llm(QuickOverviewModel)
+        
+        prompt = f"""
+基于以下文档内容，快速提取企业概况信息：
+
+{context_text}
+
+请提取关键信息并填充到QuickOverviewModel中。如果某个字段在文档中找不到，请设置为null，不要报错。
+优先提取数值型数据（营收、利润、现金流等），如果找不到具体数值，可以设置为null。
+"""
+        
+        response = await sllm.achat([
+            ChatMessage(
+                role="system",
+                content="你是一个专业的财务分析师。请快速从文档中提取关键信息，缺失的字段设置为null，不要报错。优先提取数值型数据。"
+            ),
+            ChatMessage(role="user", content=prompt)
+        ])
+        
+        overview_data = response.raw.model_dump()
+        
+        # 计算缺失字段
+        missing_fields = []
+        if not overview_data.get('revenue'): missing_fields.append('营收')
+        if not overview_data.get('net_profit'): missing_fields.append('净利润')
+        if not overview_data.get('operating_cfo'): missing_fields.append('经营现金流')
+        if not overview_data.get('top3_business'): missing_fields.append('业务结构')
+        if not overview_data.get('gross_margin'): missing_fields.append('毛利率')
+        if not overview_data.get('net_margin'): missing_fields.append('净利率')
+        if not overview_data.get('roe'): missing_fields.append('ROE')
+        if not overview_data.get('debt_ratio'): missing_fields.append('负债率')
+        if not overview_data.get('highlights'): missing_fields.append('业务亮点')
+        if not overview_data.get('risks'): missing_fields.append('风险因素')
+        
+        overview_data['missing_fields'] = missing_fields
+        
+        logger.info(f"✅ 快速概况生成成功，缺失字段: {len(missing_fields)}个")
+        
+        return JSONResponse(status_code=200, content={
+            "status": "success",
+            "overview": overview_data
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"生成快速概况失败: {str(e)}")
+        # 即使失败也返回一个空结构，不报错
+        return JSONResponse(status_code=200, content={
+            "status": "success",
+            "overview": {
+                "revenue": None,
+                "revenue_yoy": None,
+                "net_profit": None,
+                "net_profit_yoy": None,
+                "operating_cfo": None,
+                "operating_cfo_yoy": None,
+                "top3_business": None,
+                "gross_margin": None,
+                "net_margin": None,
+                "roe": None,
+                "debt_ratio": None,
+                "highlights": None,
+                "risks": None,
+                "missing_fields": ["所有字段"]
+            }
+        })

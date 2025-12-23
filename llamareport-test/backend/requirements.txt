@@ -24,6 +24,10 @@ numpy>=1.26.0
 # PDF处理
 pdfplumber>=0.10.0
 
+# Excel处理
+openpyxl>=3.1.0  # 用于读取.xlsx文件
+xlrd>=2.0.0      # 用于读取.xls文件（旧格式）
+
 # AI和ML
 openai>=1.99.0
 
