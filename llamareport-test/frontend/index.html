@@ -4,38 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LlamaReport Backend - 文档分析系统</title>
-    <!-- Vue 3 - 使用多个CDN源以确保可用性 -->
-    <script src="https://unpkg.com/vue@3/dist/vue.global.js" onerror="loadVueFallback()"></script>
-    <script>
-        function loadVueFallback() {
-            console.warn('Vue CDN加载失败，尝试备用CDN...');
-            const script = document.createElement('script');
-            script.src = 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js';
-            script.onerror = function() {
-                console.error('所有Vue CDN都加载失败，请检查网络连接');
-                document.body.innerHTML = '<div style="padding: 20px; color: red; font-family: Arial, sans-serif;"><h2>❌ Vue加载失败</h2><p>无法从CDN加载Vue.js，请检查：</p><ul><li>网络连接是否正常</li><li>是否可以使用CDN服务</li><li>防火墙是否阻止了CDN访问</li></ul><p>如果问题持续，请考虑使用本地Vue文件。</p></div>';
-            };
-            document.head.appendChild(script);
-        }
-    </script>
-    <!-- Marked.js for Markdown -->
+    <!-- Marked.js for Markdown (需要全局可用) -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <!-- Plotly.js for visualization -->
+    <!-- Plotly.js for visualization (需要全局可用) -->
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div id="app"></div>
-    <!-- 组件文件 - 按依赖顺序加载 -->
-    <script src="/static/components/Card.js"></script>
-    <script src="/static/components/FilePreviewCard.js"></script>
-    <script src="/static/components/ChatArea.js"></script>
-    <script src="/static/components/CompanyOverview.js"></script>
-    <script src="/static/components/NotesAndRisks.js"></script>
-    <script src="/static/components/DupontAnalysis.js"></script>
-    <script src="/static/components/VisualizationPanel.js"></script>
-    <script src="/static/components/MessageToast.js"></script>
-    <!-- 主应用文件 -->
-    <script src="/static/app.js"></script>
+    <!-- Vite 会自动处理 main.js 和所有依赖 -->
+    <script type="module" src="/main.js"></script>
 </body>
 </html>
