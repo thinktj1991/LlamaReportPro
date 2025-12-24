@@ -271,66 +271,6 @@ export default {
       const metricObj = data[level][metric]
       return metricObj.formula || ''
     },
-    renderDupontChart() {
-      if (!this.dupontData?.full_data || !window.Plotly) {
-        return;
-      }
-      
-      this.$nextTick(() => {
-        try {
-          const dupontData = this.dupontData.full_data;
-          const level1 = dupontData.level1 || {};
-          
-          // 创建简单的柱状图显示关键指标
-          const metrics = {
-            'ROE': parseFloat(level1.roe?.value || 0) * 100,
-            'ROA': parseFloat(level1.roa?.value || 0) * 100,
-            '权益乘数': parseFloat(level1.equity_multiplier?.value || 0)
-          };
-          
-          const trace = {
-            type: 'bar',
-            x: Object.keys(metrics),
-            y: Object.values(metrics),
-            marker: {
-              color: ['#4facfe', '#00f2fe', '#43e97b'],
-              line: { color: 'white', width: 1 }
-            },
-            text: Object.values(metrics).map((v, i) => {
-              const key = Object.keys(metrics)[i];
-              return v.toFixed(2) + (key === '权益乘数' ? '' : '%');
-            }),
-            textposition: 'outside'
-          };
-          
-          const layout = {
-            title: {
-              text: '杜邦分析关键指标',
-              font: { size: 16, color: '#333' }
-            },
-            xaxis: { title: '指标', gridcolor: '#e0e0e0' },
-            yaxis: { title: '数值', gridcolor: '#e0e0e0' },
-            height: 400,
-            margin: { t: 60, r: 40, b: 60, l: 60 },
-            paper_bgcolor: 'rgba(0,0,0,0)',
-            plot_bgcolor: 'rgba(0,0,0,0)',
-            showlegend: false
-          };
-          
-          const config = {
-            responsive: true,
-            displayModeBar: true,
-            displaylogo: false
-          };
-          
-          if (window.Plotly && window.Plotly.newPlot) {
-            window.Plotly.newPlot('dupontChart', [trace], layout, config);
-          }
-        } catch (error) {
-          console.error('渲染杜邦分析图表失败:', error);
-        }
-      });
-    },
     renderChart() {
       if (!this.chartData?.chart_config || !window.Plotly) {
         if (!window.Plotly) {
@@ -445,9 +385,8 @@ export default {
     },
     dupontData: {
       handler() {
-        if (this.dupontData && this.dupontData.full_data) {
-          this.renderDupontChart();
-        }
+        // 杜邦分析现在使用树状视图组件，不需要渲染 Plotly 图表
+        // 树状视图会自动根据数据更新
       },
       deep: true
     }
