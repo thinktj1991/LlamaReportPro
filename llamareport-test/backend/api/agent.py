@@ -195,8 +195,29 @@ async def agent_query(request: AgentQueryRequest):
         # 获取 Agent
         agent = get_report_agent()
         
-        # 执行查询
-        result = await agent.query(request.question)
+        # 执行查询，添加整体超时保护（10分钟，提高响应速度）
+        import time
+        start_time = time.time()
+        try:
+            result = await asyncio.wait_for(
+                agent.query(request.question),
+                timeout=600.0  # 10分钟整体超时
+            )
+            elapsed_time = time.time() - start_time
+            logger.info(f"✅ Agent查询完成，耗时: {elapsed_time:.2f}秒")
+        except asyncio.TimeoutError:
+            elapsed_time = time.time() - start_time
+            logger.error(f"❌ Agent查询整体超时（2分钟），实际耗时: {elapsed_time:.2f}秒")
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "status": "error",
+                    "error": f"Agent查询超时（超过2分钟），实际耗时: {elapsed_time:.2f}秒。请简化查询或使用普通查询模式",
+                    "question": request.question,
+                    "timeout_seconds": 120.0,
+                    "elapsed_seconds": elapsed_time
+                }
+            )
         
         if result["status"] == "error":
             # 统一错误响应格式
@@ -225,6 +246,8 @@ async def agent_query(request: AgentQueryRequest):
         raise
     except Exception as e:
         logger.error(f"❌ Agent 查询失败: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return JSONResponse(
             status_code=500,
             content={

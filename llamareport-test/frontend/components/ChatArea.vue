@@ -5,7 +5,7 @@
         <div class="chat-mode-selector">
           <button :class="['mode-btn', { active: queryMode === 'normal' }]" @click="queryMode = 'normal'">普通查询</button>
           <button :class="['mode-btn', { active: queryMode === 'dupont' }]" @click="handleDupontAnalysis">杜邦分析</button>
-          <button :class="['mode-btn', { active: queryMode === 'agent' }]" @click="queryMode = 'agent'">Agent分析</button>
+          <button class="mode-btn agent-mode-btn" @click="handleAgentAnalysis">🤖 Agent分析</button>
         </div>
         <div class="chat-messages" ref="messagesContainer">
           <div v-for="(msg, index) in messages" :key="index" :class="['chat-message', msg.type, { 'processing-summary': isProcessingSummary(msg.content) }]" @mouseenter="hoveredMessageIndex = index" @mouseleave="hoveredMessageIndex = null">
@@ -83,7 +83,7 @@ export default {
     loading: { type: Boolean, default: false },
     suggestions: { type: Array, default: () => [] }
   },
-  emits: ['send-message', 'clear-chat', 'agent-query', 'dupont-analysis', 'get-suggestions', 'delete-message'],
+  emits: ['send-message', 'clear-chat', 'agent-query', 'agent-analysis', 'dupont-analysis', 'get-suggestions', 'delete-message'],
   data() { 
     return { 
       inputText: '', 
@@ -125,6 +125,10 @@ export default {
     },
     handleDupontAnalysis() {
       this.$emit('dupont-analysis');
+    },
+    handleAgentAnalysis() {
+      // 触发跳转到Agent分析页面
+      this.$emit('agent-analysis');
     },
     isProcessingSummary(content) {
       if (!content) return false;

@@ -279,6 +279,8 @@ class HybridRetriever:
                             'indicator': table.get('summary', ''),
                             'year': self._extract_year_from_table(table),
                             'source': f"{doc_name}_page_{table['page_number']}",
+                            'source_file': doc_name,  # 添加source_file字段用于过滤
+                            'filename': doc_name,     # 添加filename字段用于过滤
                             'table_id': table['table_id'],
                             'is_financial': table.get('is_financial', False)
                         }
@@ -360,8 +362,19 @@ class HybridRetriever:
             return False
     
     def retrieve(self, query: str, top_k: int = 10, 
-                strategy: str = 'auto') -> List[Dict[str, Any]]:
-        """混合检索"""
+                strategy: str = 'auto', context_filter: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """混合检索
+        
+        Args:
+            query: 查询文本
+            top_k: 返回结果数量
+            strategy: 检索策略 ('auto', 'text_first', 'table_first', 'hybrid')
+            context_filter: 上下文过滤器，支持:
+                - filename: 文件名过滤
+                - company: 公司名过滤
+                - year: 年份过滤
+                - source_file: 源文件过滤
+        """
         try:
             # 1. 查询扩展
             expanded_query = self.query_expander.expand_query(query)
@@ -370,15 +383,21 @@ class HybridRetriever:
             if strategy == 'auto':
                 strategy = self._determine_retrieval_strategy(query)
             
-            # 3. 执行检索
-            if strategy == 'text_first':
-                results = self._retrieve_text_first(expanded_query, top_k)
-            elif strategy == 'table_first':
-                results = self._retrieve_table_first(expanded_query, top_k)
-            else:  # hybrid
-                results = self._retrieve_hybrid(expanded_query, top_k)
+            # 3. 执行检索（扩大检索范围，因为后续会过滤）
+            expanded_top_k = top_k * 3 if context_filter else top_k  # 如果有过滤条件，扩大检索范围
             
-            # 4. 综合评分和排序
+            if strategy == 'text_first':
+                results = self._retrieve_text_first(expanded_query, expanded_top_k)
+            elif strategy == 'table_first':
+                results = self._retrieve_table_first(expanded_query, expanded_top_k)
+            else:  # hybrid
+                results = self._retrieve_hybrid(expanded_query, expanded_top_k)
+            
+            # 4. 应用上下文过滤器
+            if context_filter:
+                results = self._apply_context_filter(results, context_filter)
+            
+            # 5. 综合评分和排序
             scored_results = []
             for result in results:
                 score_result = self.scorer.calculate_comprehensive_score(
@@ -395,10 +414,10 @@ class HybridRetriever:
                     'strategy': strategy
                 })
             
-            # 5. 按综合评分排序
+            # 6. 按综合评分排序
             scored_results.sort(key=lambda x: x['comprehensive_score'], reverse=True)
             
-            # 6. 返回Top-K结果
+            # 7. 返回Top-K结果
             return scored_results[:top_k]
             
         except Exception as e:
@@ -564,6 +583,130 @@ class HybridRetriever:
         except Exception as e:
             logger.error(f"提取年份失败: {str(e)}")
             return None
+    
+    def _apply_context_filter(self, results: List[Dict[str, Any]], 
+                             context_filter: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """应用上下文过滤器过滤检索结果"""
+        filtered_results = []
+        
+        for result in results:
+            document = result['document']
+            metadata = document.metadata
+            
+            # 检查是否匹配过滤条件
+            match = True
+            
+            # 文件名过滤（严格匹配）
+            if 'filename' in context_filter:
+                filename = context_filter['filename']
+                # 检查多个可能的字段：filename, source_file, source
+                doc_filename = (metadata.get('filename') or 
+                              metadata.get('source_file') or 
+                              metadata.get('source', ''))
+                
+                # 如果source字段包含文件名（格式：filename_page_xxx），提取文件名部分
+                if not doc_filename and metadata.get('source'):
+                    source = metadata.get('source', '')
+                    # source格式可能是 "filename_page_1"，提取文件名部分
+                    if '_page_' in source:
+                        doc_filename = source.split('_page_')[0]
+                    else:
+                        doc_filename = source
+                
+                # 标准化文件名（移除路径、统一大小写）
+                filename_normalized = filename.lower().strip()
+                doc_filename_normalized = doc_filename.lower().strip()
+                
+                # 严格匹配：文件名必须完全匹配或包含关键部分
+                # 例如："平安银行2024年年报.PDF" 应该匹配 "平安银行2024年年报.PDF"
+                # 但不应该匹配 "数源科技股份有限公司2023年年度报告_1766454332.PDF"
+                if filename_normalized != doc_filename_normalized:
+                    # 如果完全匹配失败，检查是否包含关键部分（至少前3个字符）
+                    if len(filename_normalized) >= 3:
+                        # 提取文件名的主要部分（移除扩展名和特殊字符）
+                        import re
+                        filename_key = re.sub(r'\.[^.]+$', '', filename_normalized)  # 移除扩展名
+                        filename_key = re.sub(r'[_\-\s]+', '', filename_key)  # 移除特殊字符
+                        doc_filename_key = re.sub(r'\.[^.]+$', '', doc_filename_normalized)
+                        doc_filename_key = re.sub(r'[_\-\s]+', '', doc_filename_key)
+                        
+                        # 检查关键部分是否匹配（至少前3个字符）
+                        if len(filename_key) >= 3 and len(doc_filename_key) >= 3:
+                            if filename_key[:3] != doc_filename_key[:3]:
+                                match = False
+                                logger.debug(f"文件名关键部分不匹配: 过滤条件='{filename_key[:3]}', 文档文件名='{doc_filename_key[:3]}'")
+                        else:
+                            match = False
+                    else:
+                        match = False
+                
+                # 调试日志
+                if not match:
+                    logger.debug(f"文件名不匹配: 过滤条件='{filename}', 文档文件名='{doc_filename}', 元数据={list(metadata.keys())}")
+                else:
+                    logger.debug(f"✅ 文件名匹配: 过滤条件='{filename}', 文档文件名='{doc_filename}'")
+            
+            # 源文件过滤
+            if match and 'source_file' in context_filter:
+                source_file = context_filter['source_file']
+                doc_source = metadata.get('source_file') or metadata.get('filename', '')
+                if source_file not in doc_source and doc_source not in source_file:
+                    match = False
+            
+            # 公司名过滤（从文档文本或元数据中检查）
+            if match and 'company' in context_filter:
+                company = context_filter['company']
+                doc_text = document.text.lower()
+                doc_company = metadata.get('company', '').lower()
+                doc_filename = (metadata.get('filename') or metadata.get('source_file', '')).lower()
+                
+                # 检查文档文本或元数据中是否包含公司名
+                company_lower = company.lower()
+                
+                # 从文件名中提取公司名（如果文件名包含公司名）
+                filename_company = None
+                if doc_filename:
+                    # 移除常见的报表类型关键词和年份
+                    import re
+                    clean_filename = re.sub(r'(利润表|资产负债表|现金流量表|年报|报告|财务报表|财务报告|\d{4}年?)', '', doc_filename, flags=re.IGNORECASE)
+                    clean_filename = re.sub(r'[_\-\s\.]+', '', clean_filename)
+                    if len(clean_filename) >= 2:
+                        filename_company = clean_filename
+                
+                # 检查是否匹配
+                company_found = (
+                    company_lower in doc_text or 
+                    company_lower in doc_company or
+                    (filename_company and company_lower in filename_company) or
+                    (filename_company and filename_company in company_lower)
+                )
+                
+                if not company_found:
+                    # 如果文档中明确包含其他公司名，则排除
+                    # 检查文档中是否包含其他明显的公司名（避免混淆）
+                    common_company_suffixes = ['股份', '有限', '公司', '集团', '银行', '证券', '保险']
+                    # 如果文档中包含其他完整的公司名，则排除
+                    # 这里简化处理：如果文档中没有找到目标公司名，则排除
+                    match = False
+            
+            # 年份过滤
+            if match and 'year' in context_filter:
+                filter_year = str(context_filter['year'])
+                doc_year = str(metadata.get('year', ''))
+                if doc_year and filter_year != doc_year:
+                    match = False
+            
+            if match:
+                filtered_results.append(result)
+        
+        if context_filter and filtered_results:
+            logger.info(f"✅ 上下文过滤: 从 {len(results)} 个结果中过滤出 {len(filtered_results)} 个匹配结果")
+            if 'filename' in context_filter:
+                logger.info(f"   过滤条件: filename={context_filter['filename']}")
+            if 'company' in context_filter:
+                logger.info(f"   过滤条件: company={context_filter['company']}")
+        
+        return filtered_results
     
     def get_stats(self) -> Dict[str, Any]:
         """获取检索器统计信息"""

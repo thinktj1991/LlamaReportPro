@@ -303,12 +303,18 @@ async def internal_error_handler(request, exc):
 
 if __name__ == "__main__":
     import uvicorn
+    import os
     
     # 开发环境运行配置
+    # 可以通过环境变量 RELOAD=false 来禁用自动重载（避免中断长时间运行的Agent查询）
+    reload_enabled = os.getenv("RELOAD", "true").lower() != "false"
+    
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=8000,
-        reload=True,
-        log_level="info"
+        reload=reload_enabled,
+        log_level="info",
+        # 排除某些目录，减少不必要的重载
+        reload_excludes=["*.pyc", "__pycache__", "*.log", "*.tmp"]
     )

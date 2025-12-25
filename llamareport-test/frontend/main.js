@@ -9,6 +9,7 @@ import CompanyOverview from './components/CompanyOverview.vue'
 import NotesAndRisks from './components/NotesAndRisks.vue'
 import VisualizationPanel from './components/VisualizationPanel.vue'
 import MessageToast from './components/MessageToast.vue'
+import AgentAnalysisPage from './components/AgentAnalysisPage.vue'
 
 // 导入样式
 import './style.css'
@@ -17,6 +18,7 @@ import './style.css'
 const App = {
   setup() {
     const systemStatus = ref('检查中...')
+    const currentPage = ref('main')  // 'main' 或 'agent-analysis'
     const files = ref([])
     const selectedFile = ref(null)
     const chatMessages = ref([])
@@ -31,6 +33,7 @@ const App = {
     const dupontLoading = ref(false)
     const visualizationData = ref(null)
     const visualizationLoading = ref(false)
+    const visualizationCards = ref([])  // 存储所有可视化卡片
     const processStatus = ref(null)
     const suggestions = ref([])
     
@@ -253,10 +256,19 @@ const App = {
       chatMessages.value.push({ type: 'user', content: question, timestamp: new Date() })
       queryLoading.value = true
       try {
+        // 构建context_filter：如果有选中的文件，使用文件名过滤
+        const context_filter = selectedFile.value ? {
+          filename: selectedFile.value.filename
+        } : null
+        
         const response = await fetch('/query/ask', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question: question, enable_visualization: true })
+          body: JSON.stringify({ 
+            question: question, 
+            enable_visualization: true,
+            context_filter: context_filter
+          })
         })
         
         if (!response.ok) {
@@ -293,6 +305,16 @@ const App = {
           })
           
           if (result.visualization && result.visualization.has_visualization) {
+            // 添加新的可视化卡片
+            const cardId = Date.now().toString()
+            visualizationCards.value.push({
+              id: cardId,
+              question: question,
+              timestamp: new Date(),
+              data: result.visualization,
+              type: 'chart'
+            })
+            // 保持向后兼容
             visualizationData.value = result.visualization
             visualizationLoading.value = false
           }
@@ -318,16 +340,19 @@ const App = {
     }
     
     const handleAgentQuery = async (question) => {
-      chatMessages.value.push({ type: 'user', content: question, timestamp: new Date() })
-      queryLoading.value = true
+      // 切换到Agent分析页面
+      currentPage.value = 'agent-analysis'
       
-      const progressIndex = chatMessages.value.length
-      chatMessages.value.push({ 
-        type: 'assistant', 
-        content: '🤖 Agent正在分析中，这可能需要1-3分钟，请耐心等待...\n\n正在执行：\n- 检索相关数据\n- 调用工具分析\n- 生成结构化回答', 
-        timestamp: new Date(),
-        isProgress: true
-      })
+      // 等待页面切换完成后再执行查询
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      // 触发Agent分析页面的查询
+      // 这个函数会被AgentAnalysisPage组件调用
+      return await executeAgentQuery(question)
+    }
+    
+    const executeAgentQuery = async (question) => {
+      queryLoading.value = true
       
       try {
         const controller = new AbortController()
@@ -345,109 +370,38 @@ const App = {
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({ detail: '请求失败' }))
           const errorMsg = errorData.detail || errorData.error || `HTTP ${response.status}`
-          const progressMsgIndex = chatMessages.value.findIndex(msg => msg.isProgress)
-          if (progressMsgIndex >= 0) {
-            chatMessages.value.splice(progressMsgIndex, 1)
-          }
-          chatMessages.value.push({ 
-            type: 'assistant', 
-            content: `❌ Agent查询失败: ${errorMsg}\n\n提示：请确保已上传并处理文档，Agent系统已初始化。`, 
-            timestamp: new Date() 
-          })
           showMessage('error', errorMsg)
-          return
+          return {
+            status: 'error',
+            error: errorMsg
+          }
         }
         
         const result = await response.json()
         
-        const progressMsgIndex = chatMessages.value.findIndex(msg => msg.isProgress)
-        if (progressMsgIndex >= 0) {
-          chatMessages.value.splice(progressMsgIndex, 1)
-        }
+        // 添加调试日志
+        console.log('🔍 [main.js] Agent查询响应:', {
+          status: result.status,
+          hasAnswer: !!result.answer,
+          answerLength: result.answer?.length || 0,
+          toolCallsCount: result.tool_calls?.length || 0,
+          hasVisualization: !!result.visualization,
+          hasStructuredResponse: !!result.structured_response,
+          performance: result.performance
+        })
         
         if (result.status === 'success') {
-          chatMessages.value.push({ 
-            type: 'assistant', 
-            content: result.answer, 
-            timestamp: new Date() 
-          })
-          
-          if (result.tool_calls && Array.isArray(result.tool_calls)) {
-            result.tool_calls.forEach(toolCall => {
-              const toolName = toolCall.tool_name
-              const toolOutput = toolCall.tool_output
-              
-              if (toolName === 'generate_dupont_analysis' && toolOutput) {
-                dupontData.value = toolOutput
-                dupontLoading.value = false
-              } else if (toolName === 'generate_financial_review' && toolOutput) {
-                if (!companyOverviewData.value) {
-                  companyOverviewData.value = {}
-                }
-                companyOverviewData.value.financialReview = toolOutput
-                companyOverviewLoading.value = false
-              } else if (toolName === 'generate_business_highlights' && toolOutput) {
-                if (!companyOverviewData.value) {
-                  companyOverviewData.value = {}
-                }
-                companyOverviewData.value.businessHighlights = toolOutput
-                companyOverviewLoading.value = false
-              } else if (toolName === 'generate_business_guidance' && toolOutput) {
-                if (!notesAndRisksData.value) {
-                  notesAndRisksData.value = {}
-                }
-                notesAndRisksData.value.businessGuidance = toolOutput
-                notesAndRisksLoading.value = false
-              } else if (toolName === 'retrieve_financial_data' && toolOutput) {
-                if (!companyOverviewData.value) {
-                  companyOverviewData.value = {}
-                }
-                if (!companyOverviewData.value.financialData) {
-                  companyOverviewData.value.financialData = []
-                }
-                companyOverviewData.value.financialData.push(toolOutput)
-                companyOverviewLoading.value = false
-              }
-            })
-          }
-          
-          if (result.structured_response) {
-            const structured = result.structured_response
-            if (structured.dupont_analysis) {
-              dupontData.value = structured.dupont_analysis
-              dupontLoading.value = false
-            }
-            if (structured.financial_review) {
-              if (!companyOverviewData.value) {
-                companyOverviewData.value = {}
-              }
-              companyOverviewData.value.financialReview = structured.financial_review
-              companyOverviewLoading.value = false
-            }
-          }
-          
-          if (result.visualization) {
-            visualizationData.value = result.visualization
-            visualizationLoading.value = false
-          }
-          
-          showMessage('success', 'Agent分析完成！结果已更新到各个卡片中。')
+          const toolCallsCount = result.tool_calls?.length || 0
+          const totalTime = result.performance?.total_seconds || 0
+          showMessage('success', `Agent分析完成！执行了 ${toolCallsCount} 个工具调用，耗时 ${totalTime.toFixed(1)} 秒`)
         } else {
           const errorMsg = result.error || result.detail || '查询失败'
-          chatMessages.value.push({ 
-            type: 'assistant', 
-            content: `❌ Agent查询失败: ${errorMsg}`, 
-            timestamp: new Date() 
-          })
           showMessage('error', errorMsg)
         }
+        
+        return result
       } catch (error) {
         console.error('Agent查询错误:', error)
-        
-        const progressMsgIndex = chatMessages.value.findIndex(msg => msg.isProgress)
-        if (progressMsgIndex >= 0) {
-          chatMessages.value.splice(progressMsgIndex, 1)
-        }
         
         let errorMsg = '网络错误或请求超时'
         if (error.name === 'AbortError') {
@@ -456,15 +410,22 @@ const App = {
           errorMsg = error.message
         }
         
-        chatMessages.value.push({ 
-          type: 'assistant', 
-          content: `❌ Agent查询失败: ${errorMsg}\n\n可能的原因：\n1. 网络连接问题\n2. Agent系统未初始化\n3. 索引未构建完成\n4. 查询时间过长（Agent查询通常需要1-3分钟）\n\n建议：\n- 检查网络连接\n- 尝试使用普通查询模式\n- 确保已处理文档并构建索引`, 
-          timestamp: new Date() 
-        })
         showMessage('error', errorMsg)
+        return {
+          status: 'error',
+          error: errorMsg
+        }
       } finally {
         queryLoading.value = false
       }
+    }
+    
+    const goToAgentAnalysis = () => {
+      currentPage.value = 'agent-analysis'
+    }
+    
+    const goBackToMain = () => {
+      currentPage.value = 'main'
     }
     
     const handleDupontAnalysis = async () => {
@@ -523,6 +484,7 @@ const App = {
         
         if (result.status === 'success' && result.analysis) {
           // 保存杜邦分析数据，转换为组件需要的格式
+          // 注意：杜邦分析按钮生成的视图只设置dupontData，不添加到visualizationCards
           const analysis = result.analysis
           const level1 = analysis.level1 || {}
           dupontData.value = {
@@ -532,6 +494,7 @@ const App = {
             // 保存完整数据以便后续使用
             full_data: analysis
           }
+          // 不添加到visualizationCards，因为杜邦分析按钮生成的视图应该通过dupontData显示
           dupontLoading.value = false
           
           // 生成友好的显示文本
@@ -687,6 +650,7 @@ const App = {
     const handleClearChat = () => {
       chatMessages.value = []
       visualizationData.value = null
+      visualizationCards.value = []  // 清空所有可视化卡片
     }
     
     const handleDeleteMessage = (index) => {
@@ -745,39 +709,65 @@ const App = {
     })
     
     return {
-      systemStatus, files, selectedFile, chatMessages, queryLoading, message,
+      currentPage, systemStatus, files, selectedFile, chatMessages, queryLoading, message,
       companyOverviewData, companyOverviewLoading, notesAndRisksData, notesAndRisksLoading,
-      dupontData, dupontLoading, visualizationData, visualizationLoading, processStatus, suggestions,
+      dupontData, dupontLoading, visualizationData, visualizationLoading, visualizationCards, processStatus, suggestions,
       quickOverviewData,
       showMessage, handleFileSelected, handleFileUploaded, handleFileDeleted, handleFileProcess, handleFileProcessMultiple,
-      handleSendMessage, handleAgentQuery, handleDupontAnalysis, handleGetSuggestions,
+      handleSendMessage, handleAgentQuery, executeAgentQuery, handleDupontAnalysis, handleGetSuggestions,
       handleGenerateReport, handleGenerateSection, handleClearChat, checkIndexStatus, loadQuickOverview,
-      handleDeleteMessage
+      handleDeleteMessage, goToAgentAnalysis, goBackToMain,
+      handleRemoveVizCard: (cardId) => {
+        // 删除整个卡片（包括图表、推荐说明、数据洞察等所有内容）
+        const index = visualizationCards.value.findIndex(card => card.id === cardId)
+        if (index > -1) {
+          visualizationCards.value.splice(index, 1)
+        }
+        // 如果删除的是当前显示的图表，也清空visualizationData
+        if (visualizationData.value && visualizationCards.value.length === 0) {
+          visualizationData.value = null
+        }
+      },
+      handleRemoveDupontCard: () => {
+        // 删除杜邦分析卡片：从cards中删除所有杜邦分析类型的卡片，并清空dupontData
+        visualizationCards.value = visualizationCards.value.filter(card => card.type !== 'dupont')
+        dupontData.value = null
+      }
     }
   },
   template: `
     <div class="app-container">
-      <header class="app-header">
-        <div class="header-content">
-          <h1 class="app-title">🚀 FinDecipher</h1>
-        </div>
-        <div class="header-status">
-          <span class="status-text">{{ systemStatus }}</span>
-        </div>
-      </header>
-      <main class="app-main">
-        <aside class="left-panel">
-          <FilePreviewCard ref="filePreviewCard" :files="files" @file-selected="handleFileSelected" @file-uploaded="handleFileUploaded" @file-deleted="handleFileDeleted" @file-process="handleFileProcess" @file-process-multiple="handleFileProcessMultiple" @show-message="showMessage" @files-processed="handleFilesProcessed" />
-          <CompanyOverview :data="companyOverviewData" :loading="companyOverviewLoading" :overview-data="quickOverviewData" @generate-report="handleGenerateReport" />
-        </aside>
-        <section class="middle-panel">
-          <ChatArea :messages="chatMessages" :loading="queryLoading" :suggestions="suggestions" @send-message="handleSendMessage" @agent-query="handleAgentQuery" @dupont-analysis="handleDupontAnalysis" @get-suggestions="handleGetSuggestions" @clear-chat="handleClearChat" @delete-message="handleDeleteMessage" />
-        </section>
-        <aside class="right-panel">
-          <VisualizationPanel :chart-data="visualizationData" :dupont-data="dupontData" :loading="visualizationLoading || dupontLoading" />
-        </aside>
-      </main>
-      <MessageToast :message="message" />
+      <!-- Agent分析页面 -->
+      <AgentAnalysisPage 
+        v-if="currentPage === 'agent-analysis'"
+        :on-back="goBackToMain"
+        :on-query="executeAgentQuery"
+      />
+      
+      <!-- 主页面 -->
+      <template v-else>
+        <header class="app-header">
+          <div class="header-content">
+            <h1 class="app-title">🚀 FinDecipher</h1>
+          </div>
+          <div class="header-status">
+            <span class="status-text">{{ systemStatus }}</span>
+          </div>
+        </header>
+        <main class="app-main">
+          <aside class="left-panel">
+            <FilePreviewCard ref="filePreviewCard" :files="files" @file-selected="handleFileSelected" @file-uploaded="handleFileUploaded" @file-deleted="handleFileDeleted" @file-process="handleFileProcess" @file-process-multiple="handleFileProcessMultiple" @show-message="showMessage" @files-processed="handleFilesProcessed" />
+            <CompanyOverview :data="companyOverviewData" :loading="companyOverviewLoading" :overview-data="quickOverviewData" @generate-report="handleGenerateReport" />
+          </aside>
+          <section class="middle-panel">
+            <ChatArea :messages="chatMessages" :loading="queryLoading" :suggestions="suggestions" @send-message="handleSendMessage" @agent-query="handleAgentQuery" @agent-analysis="goToAgentAnalysis" @dupont-analysis="handleDupontAnalysis" @get-suggestions="handleGetSuggestions" @clear-chat="handleClearChat" @delete-message="handleDeleteMessage" />
+          </section>
+          <aside class="right-panel">
+            <VisualizationPanel :chart-data="visualizationData" :dupont-data="dupontData" :visualization-cards="visualizationCards" :loading="visualizationLoading || dupontLoading" @remove-card="handleRemoveVizCard" @remove-dupont-card="handleRemoveDupontCard" />
+          </aside>
+        </main>
+        <MessageToast :message="message" />
+      </template>
     </div>
   `
 }
@@ -793,6 +783,7 @@ app.component('CompanyOverview', CompanyOverview)
 app.component('NotesAndRisks', NotesAndRisks)
 app.component('VisualizationPanel', VisualizationPanel)
 app.component('MessageToast', MessageToast)
+app.component('AgentAnalysisPage', AgentAnalysisPage)
 
 // 挂载应用
 app.mount('#app')

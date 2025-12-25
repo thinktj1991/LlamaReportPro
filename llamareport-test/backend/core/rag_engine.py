@@ -563,8 +563,10 @@ class RAGEngine:
             # 执行查询
             if self.use_hybrid_retriever and self.hybrid_retriever.text_index and self.hybrid_retriever.table_index:
                 print("🔍 使用Hybrid Retriever执行混合检索...")
-                # 使用Hybrid Retriever进行检索
-                hybrid_results = self.hybrid_retriever.retrieve(question, top_k=10)
+                if context_filter:
+                    print(f"🔍 应用上下文过滤器: {context_filter}")
+                # 使用Hybrid Retriever进行检索，传递context_filter
+                hybrid_results = self.hybrid_retriever.retrieve(question, top_k=10, context_filter=context_filter)
                 
                 if hybrid_results:
                     print(f"📊 Hybrid Retriever检索结果:")
@@ -572,11 +574,50 @@ class RAGEngine:
                     print(f"  - 平均综合评分: {sum(r['comprehensive_score'] for r in hybrid_results)/len(hybrid_results):.3f}")
                     print(f"  - 策略: {hybrid_results[0]['strategy']}")
                     
-                    # 构建上下文
+                    # 显示检索到的文档来源（用于调试）
+                    if hybrid_results:
+                        print(f"  - 文档来源:")
+                        for i, result in enumerate(hybrid_results[:3], 1):
+                            metadata = result['document'].metadata
+                            filename = metadata.get('filename') or metadata.get('source_file', 'unknown')
+                            print(f"      {i}. {filename}")
+                    
+                    # 构建上下文（使用过滤后的结果）
                     context = "\n\n".join([r['document'].text for r in hybrid_results])
                     
-                    # 使用LLM生成回答
-                    response = self.query_engine.query(enhanced_query)
+                    # 使用过滤后的上下文直接生成回答，而不是重新查询
+                    # 这样可以确保只使用过滤后的文档
+                    from llama_index.core import Settings
+                    from llama_index.core.llms import ChatMessage
+                    
+                    # 构建包含过滤后上下文的提示词
+                    context_prompt = f"""{enhanced_query}
+
+【检索到的文档内容】
+{context}
+
+请基于以上检索到的文档内容回答问题。如果文档内容中没有相关信息，请明确说明。"""
+                    
+                    # 使用LLM直接生成回答（同步方式）
+                    llm = Settings.llm
+                    messages = [
+                        ChatMessage(role="system", content="你是一个专业的财务分析助手。请基于提供的文档内容准确回答问题，不要编造信息。"),
+                        ChatMessage(role="user", content=context_prompt)
+                    ]
+                    # 使用同步方法
+                    try:
+                        response_obj = llm.chat(messages)
+                        # 提取响应文本
+                        if hasattr(response_obj, 'message'):
+                            response = str(response_obj.message.content)
+                        elif hasattr(response_obj, 'content'):
+                            response = str(response_obj.content)
+                        else:
+                            response = str(response_obj)
+                    except Exception as e:
+                        logger.error(f"LLM生成回答失败: {str(e)}")
+                        # 如果LLM调用失败，回退到query_engine（但使用过滤后的上下文）
+                        response = f"基于检索到的文档内容：\n\n{context[:1000]}...\n\n（注意：这是从过滤后的文档中提取的内容）"
                     
                     # 提取来源信息
                     sources = []
@@ -593,8 +634,13 @@ class RAGEngine:
                     print("⚠️ Hybrid Retriever未找到结果，回退到传统检索")
                     response = self.query_engine.query(enhanced_query)
                     sources = self._extract_sources(response)
+                    # 对传统检索结果也应用过滤
+                    if context_filter:
+                        sources = self._filter_sources(sources, context_filter)
             else:
                 print("🔍 执行传统向量检索和LLM生成...")
+                if context_filter:
+                    print(f"🔍 应用上下文过滤器: {context_filter}")
                 # 检查Hybrid Retriever索引状态
                 if self.use_hybrid_retriever:
                     text_ready = self.hybrid_retriever.text_index is not None
@@ -604,11 +650,38 @@ class RAGEngine:
                         print("   ⚠️ Hybrid Retriever索引未完全加载，使用传统检索")
                         print("   💡 提示: 如果检索结果不准确，请重新处理文档以构建Hybrid Retriever索引")
                 
-                response = self.query_engine.query(enhanced_query)
-                
-                # 提取来源信息
-                print("📚 提取来源信息...")
-                sources = self._extract_sources(response)
+                # 如果有context_filter，使用retriever手动过滤
+                if context_filter and self.index:
+                    print("🔍 使用带过滤的检索器...")
+                    retriever = self.index.as_retriever(similarity_top_k=30)  # 扩大检索范围
+                    nodes = retriever.retrieve(question)
+                    # 应用过滤
+                    filtered_nodes = self._filter_nodes(nodes, context_filter)
+                    if filtered_nodes:
+                        # 使用过滤后的节点构建上下文
+                        context_text = "\n\n".join([node.text for node in filtered_nodes[:10]])
+                        # 使用query_engine但限制在过滤后的节点
+                        response = self.query_engine.query(enhanced_query)
+                        # 提取来源时只使用过滤后的节点
+                        sources = []
+                        for node in filtered_nodes[:10]:
+                            sources.append({
+                                'text': node.text[:200] + "..." if len(node.text) > 200 else node.text,
+                                'metadata': node.metadata,
+                                'score': getattr(node, 'score', 0.0)
+                            })
+                    else:
+                        print("⚠️ 过滤后没有匹配的文档")
+                        response = self.query_engine.query(enhanced_query)
+                        sources = self._extract_sources(response)
+                else:
+                    response = self.query_engine.query(enhanced_query)
+                    # 提取来源信息
+                    print("📚 提取来源信息...")
+                    sources = self._extract_sources(response)
+                    # 对传统检索结果也应用过滤
+                    if context_filter:
+                        sources = self._filter_sources(sources, context_filter)
                 
                 # 打印检索到的来源摘要（帮助诊断）
                 if sources:
@@ -747,6 +820,128 @@ class RAGEngine:
         except Exception as e:
             logger.error(f"获取相似内容失败: {str(e)}")
             return []
+    
+    def _filter_nodes(self, nodes: List, context_filter: Dict[str, Any]) -> List:
+        """过滤节点列表"""
+        filtered = []
+        for node in nodes:
+            metadata = node.metadata
+            match = True
+            
+            # 文件名过滤
+            if 'filename' in context_filter:
+                filename = context_filter['filename']
+                doc_filename = metadata.get('filename') or metadata.get('source_file', '')
+                if filename not in doc_filename and doc_filename not in filename:
+                    match = False
+            
+            # 源文件过滤
+            if match and 'source_file' in context_filter:
+                source_file = context_filter['source_file']
+                doc_source = metadata.get('source_file') or metadata.get('filename', '')
+                if source_file not in doc_source and doc_source not in source_file:
+                    match = False
+            
+            # 公司名过滤
+            if match and 'company' in context_filter:
+                company = context_filter['company']
+                doc_text = node.text.lower()
+                doc_company = metadata.get('company', '').lower()
+                doc_filename = (metadata.get('filename') or metadata.get('source_file', '')).lower()
+                company_lower = company.lower()
+                
+                # 从文件名中提取公司名
+                filename_company = None
+                if doc_filename:
+                    import re
+                    clean_filename = re.sub(r'(利润表|资产负债表|现金流量表|年报|报告|财务报表|财务报告|\d{4}年?)', '', doc_filename, flags=re.IGNORECASE)
+                    clean_filename = re.sub(r'[_\-\s\.]+', '', clean_filename)
+                    if len(clean_filename) >= 2:
+                        filename_company = clean_filename
+                
+                # 检查是否匹配
+                company_found = (
+                    company_lower in doc_text or 
+                    company_lower in doc_company or
+                    (filename_company and company_lower in filename_company) or
+                    (filename_company and filename_company in company_lower)
+                )
+                
+                if not company_found:
+                    match = False
+            
+            # 年份过滤
+            if match and 'year' in context_filter:
+                filter_year = str(context_filter['year'])
+                doc_year = str(metadata.get('year', ''))
+                if doc_year and filter_year != doc_year:
+                    match = False
+            
+            if match:
+                filtered.append(node)
+        
+        return filtered
+    
+    def _filter_sources(self, sources: List[Dict], context_filter: Dict[str, Any]) -> List[Dict]:
+        """过滤来源列表"""
+        filtered = []
+        for source in sources:
+            metadata = source.get('metadata', {})
+            match = True
+            
+            # 文件名过滤
+            if 'filename' in context_filter:
+                filename = context_filter['filename']
+                doc_filename = metadata.get('filename') or metadata.get('source_file', '')
+                if filename not in doc_filename and doc_filename not in filename:
+                    match = False
+            
+            # 源文件过滤
+            if match and 'source_file' in context_filter:
+                source_file = context_filter['source_file']
+                doc_source = metadata.get('source_file') or metadata.get('filename', '')
+                if source_file not in doc_source and doc_source not in source_file:
+                    match = False
+            
+            # 公司名过滤
+            if match and 'company' in context_filter:
+                company = context_filter['company']
+                doc_text = source.get('text', '').lower()
+                doc_company = metadata.get('company', '').lower()
+                doc_filename = (metadata.get('filename') or metadata.get('source_file', '')).lower()
+                company_lower = company.lower()
+                
+                # 从文件名中提取公司名
+                filename_company = None
+                if doc_filename:
+                    import re
+                    clean_filename = re.sub(r'(利润表|资产负债表|现金流量表|年报|报告|财务报表|财务报告|\d{4}年?)', '', doc_filename, flags=re.IGNORECASE)
+                    clean_filename = re.sub(r'[_\-\s\.]+', '', clean_filename)
+                    if len(clean_filename) >= 2:
+                        filename_company = clean_filename
+                
+                # 检查是否匹配
+                company_found = (
+                    company_lower in doc_text or 
+                    company_lower in doc_company or
+                    (filename_company and company_lower in filename_company) or
+                    (filename_company and filename_company in company_lower)
+                )
+                
+                if not company_found:
+                    match = False
+            
+            # 年份过滤
+            if match and 'year' in context_filter:
+                filter_year = str(context_filter['year'])
+                doc_year = str(metadata.get('year', ''))
+                if doc_year and filter_year != doc_year:
+                    match = False
+            
+            if match:
+                filtered.append(source)
+        
+        return filtered
     
     def get_index_stats(self) -> Dict[str, Any]:
         """获取索引统计信息"""
