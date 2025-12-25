@@ -20,6 +20,32 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
+
+def _clean_decimal_types(obj: Any) -> Any:
+    """
+    递归清理数据中的 Decimal 类型，转换为 float 以便 JSON 序列化
+    
+    Args:
+        obj: 需要清理的对象（可以是 dict, list, Decimal, 或其他类型）
+    
+    Returns:
+        清理后的对象，所有 Decimal 类型都转换为 float
+    """
+    try:
+        from decimal import Decimal
+        
+        if isinstance(obj, Decimal):
+            return float(obj)
+        elif isinstance(obj, dict):
+            return {key: _clean_decimal_types(value) for key, value in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [_clean_decimal_types(item) for item in obj]
+        else:
+            return obj
+    except ImportError:
+        # 如果 decimal 模块不可用，直接返回原对象
+        return obj
+
 # 全局实例(延迟初始化)
 rag_engine = None
 report_agent = None
@@ -36,15 +62,37 @@ def get_report_agent():
     """获取 Report Agent 实例"""
     global report_agent
     if report_agent is None:
-        rag = get_rag_engine()
-        if not rag.query_engine:
-            # 尝试加载现有索引
-            if not rag.load_existing_index():
-                raise HTTPException(
-                    status_code=500,
-                    detail="RAG 引擎未初始化,请先上传并处理文档"
-                )
-        report_agent = ReportAgent(rag.query_engine)
+        try:
+            rag = get_rag_engine()
+            if not rag.query_engine:
+                # 尝试加载现有索引
+                logger.info("🔄 RAG查询引擎未初始化，尝试加载现有索引...")
+                if not rag.load_existing_index():
+                    error_msg = (
+                        "RAG 引擎未初始化，请先上传并处理文档。\n"
+                        "请确保：\n"
+                        "1. 已上传PDF文档\n"
+                        "2. 已处理文档并构建索引\n"
+                        "3. ChromaDB索引文件存在"
+                    )
+                    logger.error(f"❌ {error_msg}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail=error_msg
+                    )
+            logger.info("✅ RAG查询引擎已就绪，初始化ReportAgent...")
+            report_agent = ReportAgent(rag.query_engine)
+            logger.info("✅ ReportAgent初始化成功")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"❌ ReportAgent初始化失败: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise HTTPException(
+                status_code=500,
+                detail=f"ReportAgent初始化失败: {str(e)}"
+            )
     return report_agent
 
 def get_template_renderer():
@@ -118,14 +166,17 @@ async def generate_report(request: GenerateReportRequest, background_tasks: Back
                     output_path
                 )
         
-        return JSONResponse(content={
+        response_data = {
             "status": "success",
             "company_name": request.company_name,
             "year": request.year,
             "report": result["report"],
             "structured_response": result.get("structured_response"),
             "saved_to": request.output_path if request.save_to_file else None
-        })
+        }
+        # 清理 Decimal 类型
+        response_data = _clean_decimal_types(response_data)
+        return JSONResponse(content=response_data)
         
     except Exception as e:
         logger.error(f"❌ 生成报告失败: {str(e)}")
@@ -163,7 +214,9 @@ async def generate_section(request: GenerateSectionRequest):
         if result["status"] == "error":
             raise HTTPException(status_code=500, detail=result["error"])
         
-        return JSONResponse(content=result)
+        # 清理 Decimal 类型
+        cleaned_result = _clean_decimal_types(result)
+        return JSONResponse(content=cleaned_result)
         
     except HTTPException:
         raise
@@ -207,14 +260,14 @@ async def agent_query(request: AgentQueryRequest):
             logger.info(f"✅ Agent查询完成，耗时: {elapsed_time:.2f}秒")
         except asyncio.TimeoutError:
             elapsed_time = time.time() - start_time
-            logger.error(f"❌ Agent查询整体超时（2分钟），实际耗时: {elapsed_time:.2f}秒")
+            logger.error(f"❌ Agent查询整体超时（10分钟），实际耗时: {elapsed_time:.2f}秒")
             return JSONResponse(
                 status_code=500,
                 content={
                     "status": "error",
-                    "error": f"Agent查询超时（超过2分钟），实际耗时: {elapsed_time:.2f}秒。请简化查询或使用普通查询模式",
+                    "error": f"Agent查询超时（超过10分钟），实际耗时: {elapsed_time:.2f}秒。请简化查询或使用普通查询模式",
                     "question": request.question,
-                    "timeout_seconds": 120.0,
+                    "timeout_seconds": 600.0,
                     "elapsed_seconds": elapsed_time
                 }
             )
@@ -239,6 +292,9 @@ async def agent_query(request: AgentQueryRequest):
             "structured_response": result.get("structured_response"),
             "visualization": result.get("visualization")
         }
+        
+        # 清理响应数据中的 Decimal 类型，确保 JSON 可序列化
+        response_data = _clean_decimal_types(response_data)
         
         return JSONResponse(status_code=200, content=response_data)
         

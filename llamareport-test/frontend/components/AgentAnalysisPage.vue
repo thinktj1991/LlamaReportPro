@@ -390,7 +390,14 @@ export default {
             console.log(`🔧 [AgentAnalysisPage] 处理 ${result.tool_calls.length} 个工具调用`)
             result.tool_calls.forEach((toolCall, index) => {
               const toolName = toolCall.tool_name
-              const toolOutput = toolCall.tool_output
+              // 从工具调用中提取实际输出（可能是 raw_output 字段）
+              let toolOutput = toolCall.tool_output
+              
+              // 如果 tool_output 是包含 raw_output 的对象，提取它
+              if (toolOutput && typeof toolOutput === 'object' && toolOutput.raw_output !== undefined) {
+                toolOutput = toolOutput.raw_output
+                console.log(`  [${index + 1}] 从 tool_output.raw_output 提取内容`)
+              }
               
               console.log(`  [${index + 1}] 工具: ${toolName}`, {
                 hasOutput: !!toolOutput,
@@ -405,18 +412,72 @@ export default {
               }
               
               // 处理各种工具的输出
+              // 辅助函数：从工具输出中提取文本内容
+              const extractTextFromToolOutput = (output) => {
+                if (!output) return null
+                
+                // 如果是字符串，直接返回
+                if (typeof output === 'string') {
+                  return output
+                }
+                
+                // 如果是对象，尝试提取文本字段
+                if (typeof output === 'object') {
+                  // 优先查找常见的文本字段
+                  if (output.raw_output && typeof output.raw_output === 'string') {
+                    return output.raw_output
+                  }
+                  if (output.content && typeof output.content === 'string') {
+                    return output.content
+                  }
+                  if (output.text && typeof output.text === 'string') {
+                    return output.text
+                  }
+                  if (output.answer && typeof output.answer === 'string') {
+                    return output.answer
+                  }
+                  // 如果有 summary 或 report 字段
+                  if (output.summary && typeof output.summary === 'string') {
+                    return output.summary
+                  }
+                  if (output.report && typeof output.report === 'string') {
+                    return output.report
+                  }
+                  // 如果是包含 blocks 的对象（LlamaIndex 格式）
+                  if (output.blocks && Array.isArray(output.blocks)) {
+                    return output.blocks.map(block => {
+                      if (typeof block === 'string') return block
+                      if (block.text) return block.text
+                      if (block.content) return block.content
+                      return JSON.stringify(block)
+                    }).join('\n\n')
+                  }
+                  // 最后尝试 JSON 序列化（用于调试）
+                  console.warn('⚠️ [AgentAnalysisPage] 无法从工具输出中提取文本，使用 JSON 格式:', output)
+                  return JSON.stringify(output, null, 2)
+                }
+                
+                // 其他类型转换为字符串
+                return String(output)
+              }
+              
               if (toolName === 'generate_dupont_analysis' && toolOutput) {
+                // 杜邦分析保持为对象（需要特殊处理）
                 this.structuredData.dupontAnalysis = toolOutput
                 console.log('✅ [AgentAnalysisPage] 设置杜邦分析数据')
               } else if (toolName === 'generate_financial_review' && toolOutput) {
-                this.structuredData.financialReview = toolOutput
-                console.log('✅ [AgentAnalysisPage] 设置财务点评数据')
+                // 提取文本内容
+                const textContent = extractTextFromToolOutput(toolOutput)
+                this.structuredData.financialReview = textContent || toolOutput
+                console.log('✅ [AgentAnalysisPage] 设置财务点评数据', typeof textContent === 'string' ? `(文本，长度: ${textContent.length})` : '(对象)')
               } else if (toolName === 'generate_business_highlights' && toolOutput) {
-                this.structuredData.businessHighlights = toolOutput
-                console.log('✅ [AgentAnalysisPage] 设置业务亮点数据')
+                const textContent = extractTextFromToolOutput(toolOutput)
+                this.structuredData.businessHighlights = textContent || toolOutput
+                console.log('✅ [AgentAnalysisPage] 设置业务亮点数据', typeof textContent === 'string' ? `(文本，长度: ${textContent.length})` : '(对象)')
               } else if (toolName === 'generate_business_guidance' && toolOutput) {
-                this.structuredData.businessGuidance = toolOutput
-                console.log('✅ [AgentAnalysisPage] 设置业绩指引数据')
+                const textContent = extractTextFromToolOutput(toolOutput)
+                this.structuredData.businessGuidance = textContent || toolOutput
+                console.log('✅ [AgentAnalysisPage] 设置业绩指引数据', typeof textContent === 'string' ? `(文本，长度: ${textContent.length})` : '(对象)')
               } else if (toolName === 'generate_visualization' && toolOutput && toolOutput.has_visualization) {
                 this.visualizations.push({
                   id: Date.now().toString() + '-' + this.visualizations.length,
@@ -532,7 +593,50 @@ export default {
       })
     },
     parseMarkdown(text) {
-      return typeof marked !== 'undefined' ? marked.parse(text || '') : (text || '')
+      // 确保输入是字符串类型
+      if (!text) {
+        return ''
+      }
+      
+      // 如果是对象，尝试转换为字符串
+      if (typeof text === 'object') {
+        console.warn('⚠️ [AgentAnalysisPage] parseMarkdown 收到对象类型，尝试转换:', text)
+        try {
+          // 尝试提取可能的文本字段
+          if (text.answer) {
+            text = text.answer
+          } else if (text.content) {
+            text = text.content
+          } else if (text.text) {
+            text = text.text
+          } else {
+            // 如果都没有，尝试 JSON 序列化（仅用于调试）
+            text = JSON.stringify(text, null, 2)
+          }
+        } catch (e) {
+          console.error('❌ [AgentAnalysisPage] 对象转换失败:', e)
+          text = String(text)
+        }
+      }
+      
+      // 确保是字符串
+      if (typeof text !== 'string') {
+        text = String(text)
+      }
+      
+      // 使用 marked 解析
+      if (typeof marked !== 'undefined' && marked && marked.parse) {
+        try {
+          return marked.parse(text)
+        } catch (e) {
+          console.error('❌ [AgentAnalysisPage] marked.parse 失败:', e, '输入类型:', typeof text, '输入长度:', text.length)
+          // 如果 marked 解析失败，返回原始文本（转义 HTML）
+          return text.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
+        }
+      } else {
+        // 如果 marked 不可用，返回转义后的文本
+        return text.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
+      }
     },
     removeVisualization(index) {
       const viz = this.visualizations[index]

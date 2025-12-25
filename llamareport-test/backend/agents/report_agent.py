@@ -67,6 +67,14 @@ class ReportAgent:
                 # 普通字符串直接返回
                 return tool_output
 
+            # 处理 Decimal 类型（转换为 float 以便 JSON 序列化）
+            try:
+                from decimal import Decimal
+                if isinstance(tool_output, Decimal):
+                    return float(tool_output)
+            except ImportError:
+                pass
+            
             # 如果是数字、布尔值、None，直接返回
             if isinstance(tool_output, (int, float, bool, type(None))):
                 return tool_output
@@ -539,7 +547,18 @@ class ReportAgent:
                         try:
                             # 将ToolOutput转换为可序列化的格式
                             serialize_start = time.time()
-                            tool_output_serializable = self._serialize_tool_output(event.tool_output)
+                            
+                            # 先尝试直接序列化
+                            try:
+                                tool_output_serializable = self._serialize_tool_output(event.tool_output)
+                            except Exception as serialize_error:
+                                logger.warning(f"⚠️ [{event_time:.2f}s] 工具 {tool_name} 序列化失败，使用备用方法: {str(serialize_error)}")
+                                # 备用序列化方法
+                                if hasattr(event.tool_output, '__dict__'):
+                                    tool_output_serializable = {k: str(v) for k, v in event.tool_output.__dict__.items() if not k.startswith('_')}
+                                else:
+                                    tool_output_serializable = {"raw_output": str(event.tool_output), "serialization_error": str(serialize_error)}
+                            
                             serialize_duration = time.time() - serialize_start
                             
                             if serialize_duration > 1.0:
@@ -555,7 +574,8 @@ class ReportAgent:
                                     logger.error(f"❌ [{event_time:.2f}s] 工具 {tool_name} 执行失败: {tool_output_serializable.get('error', '未知错误')}")
                             elif isinstance(tool_output_serializable, str):
                                 logger.info(f"🔍 [Agent Query] 工具 {tool_name} 输出字符串长度: {len(tool_output_serializable)}")
-                                logger.info(f"🔍 [Agent Query] 工具 {tool_name} 输出字符串（前200字符）: {tool_output_serializable[:200]}")
+                                if len(tool_output_serializable) > 0:
+                                    logger.info(f"🔍 [Agent Query] 工具 {tool_name} 输出字符串（前200字符）: {tool_output_serializable[:200]}")
 
                             # 确保工具输出是可序列化的字典格式
                             tool_result = {
@@ -632,19 +652,46 @@ class ReportAgent:
                 logger.error(f"[Agent Query] 错误堆栈:\n{traceback.format_exc()}")
                 raise
 
-            # 提取回答内容
+            # 提取回答内容 - 增强版本，支持更多响应格式
             answer_text = ""
-            if hasattr(response, 'message'):
-                if hasattr(response.message, 'content'):
-                    answer_text = str(response.message.content)
+            try:
+                if hasattr(response, 'message'):
+                    if hasattr(response.message, 'content'):
+                        answer_text = str(response.message.content)
+                    elif hasattr(response.message, 'text'):
+                        answer_text = str(response.message.text)
+                    else:
+                        answer_text = str(response.message)
+                elif hasattr(response, 'content'):
+                    answer_text = str(response.content)
+                elif hasattr(response, 'response'):
+                    answer_text = str(response.response)
+                elif hasattr(response, 'text'):
+                    answer_text = str(response.text)
+                elif hasattr(response, 'answer'):
+                    answer_text = str(response.answer)
                 else:
-                    answer_text = str(response.message)
-            elif hasattr(response, 'content'):
-                answer_text = str(response.content)
-            elif hasattr(response, 'response'):
-                answer_text = str(response.response)
-            else:
-                answer_text = str(response)
+                    # 尝试直接转换为字符串
+                    answer_text = str(response)
+                
+                # 如果提取的内容为空，尝试从工具结果中生成总结
+                if not answer_text or answer_text.strip() == "":
+                    logger.warning("[Agent Query] 响应内容为空，尝试从工具结果生成总结")
+                    if tool_results:
+                        # 尝试从工具输出中提取文本
+                        for tool_result in tool_results:
+                            tool_output = tool_result.get("tool_output", {})
+                            if isinstance(tool_output, dict):
+                                # 查找可能的文本字段
+                                for key in ['answer', 'content', 'text', 'summary', 'report']:
+                                    if key in tool_output and tool_output[key]:
+                                        answer_text = str(tool_output[key])
+                                        break
+                                if answer_text:
+                                    break
+            except Exception as extract_error:
+                logger.warning(f"[Agent Query] 提取回答内容时出错: {str(extract_error)}，使用默认处理")
+                answer_text = str(response) if response else ""
             
             # 如果没有回答内容，但有工具调用结果，生成一个总结
             if not answer_text or answer_text.strip() == "":
