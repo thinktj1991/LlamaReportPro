@@ -1777,6 +1777,7 @@ body {
     max-height: 320px;
     background: white;
     border-radius: 8px;
+    position: relative;
     padding: 8px;
     margin-bottom: 8px;
     overflow: hidden;

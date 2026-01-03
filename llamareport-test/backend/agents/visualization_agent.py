@@ -212,13 +212,20 @@ class VisualizationAgent:
 回答: {answer}
 
 {sources_info}
+
+【重要提示】
+1. 如果查询涉及"营业收入"、"收入"等指标，必须从回答和来源中提取具体的历史数据
+2. 如果回答中只提到单个数值，尝试从sources中查找历史数据（如最近3-5年的数据）
+3. 如果查询要求"趋势"、"变化"、"增长"，必须提取时间序列数据
+4. 数值单位要准确识别（元、万元、亿元、%等）
+
 请提取以下信息（以JSON格式返回）：
 1. has_data: 是否包含可视化数据（true/false）
 2. data_type: 数据类型（time_series/comparison/distribution/single_value/table）
-3. labels: 标签列表（如果适用）
-4. values: 数值列表（如果适用）
+3. labels: 标签列表（如果适用，如年份）
+4. values: 数值列表（如果适用，必须是具体数字）
 5. series: 多系列数据（如果适用）
-6. unit: 数值单位（如元、%、万等）
+6. unit: 数值单位（如元、%、万、亿元等）
 7. time_period: 时间周期（如果是时间序列）
 
 示例输出：
@@ -299,6 +306,9 @@ class VisualizationAgent:
             
             combined_table_text = "\n\n".join(table_texts[:3])  # 最多使用前3个表格
             
+            # 记录表格数据预览，便于调试
+            logger.info(f"📊 表格数据预览: {combined_table_text[:500]}...")
+            
             prompt = f"""
 分析以下查询和表格数据，提取可用于可视化的数据。
 
@@ -308,6 +318,12 @@ class VisualizationAgent:
 
 表格数据:
 {combined_table_text}
+
+【特别重要 - 营业收入数据提取】
+- 如果查询涉及"营业收入"，必须在表格中查找包含"营业收入"、"营业总收入"、"收入"等关键词的行
+- 仔细检查表格的列标题，找到包含年份或时间周期的列
+- 提取该行对应的所有年份的数值
+- 如果表格格式是：| 营业收入 | 2021年 | 2022年 | 2023年 |，则提取所有年份的数值
 
 请从表格数据中提取以下信息（以JSON格式返回）：
 1. has_data: 是否包含可视化数据（true/false）

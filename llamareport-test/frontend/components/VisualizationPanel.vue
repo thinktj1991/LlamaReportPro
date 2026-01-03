@@ -2,6 +2,25 @@
   <Card title="可视化视图" icon="📊" :status="status" empty-text="暂无可视化数据">
     <template #default>
       <div class="visualization-panel-container">
+        <!-- 选择模式和生成总分析按钮 -->
+        <div v-if="hasAnyVisualization" class="viz-controls">
+          <button 
+            class="toggle-select-btn" 
+            :class="{ active: selectionMode }"
+            @click="toggleSelectionMode"
+          >
+            {{ selectionMode ? '取消选择' : '选择卡片' }}
+          </button>
+          <button 
+            v-if="selectionMode && selectedCards.length > 0"
+            class="generate-analysis-btn"
+            @click="generateComprehensiveAnalysis"
+            :disabled="generatingAnalysis"
+          >
+            {{ generatingAnalysis ? '生成中...' : `生成总分析 (已选${selectedCards.length}个)` }}
+          </button>
+        </div>
+        
         <!-- 卡片列表容器 -->
         <div class="visualization-cards-list" v-if="hasAnyVisualization">
           <!-- 杜邦分析卡片 -->
@@ -110,19 +129,29 @@
             v-for="card in visualizationCards.filter(c => c.type !== 'dupont')" 
             :key="card.id" 
             class="viz-card chart-card"
+            :class="{ 'selected': isCardSelected(card.id), 'selectable': selectionMode }"
+            @click="handleCardClick(card.id)"
           >
             <div class="viz-card-header">
               <div class="viz-card-title">
+                <span v-if="selectionMode" class="selection-checkbox" :class="{ checked: isCardSelected(card.id) }">
+                  {{ isCardSelected(card.id) ? '✓' : '' }}
+                </span>
                 <span class="viz-card-icon">📊</span>
                 <h3>{{ card.question || '数据可视化' }}</h3>
               </div>
               <div class="viz-card-actions">
-                <button class="viz-card-close" @click="removeCard(card.id)" title="删除">×</button>
+                <button class="viz-card-close" @click.stop="removeCard(card.id)" title="删除">×</button>
               </div>
             </div>
             <div class="viz-card-content">
               <div v-if="card.data && card.data.has_visualization" class="chart-card-content">
                 <div :id="'chart-' + card.id" class="chart-container-inline"></div>
+                
+                <!-- 综合能力分析文本 -->
+                <div v-if="card.data.analysis_text" class="analysis-text-box">
+                  <div v-html="formatAnalysisText(card.data.analysis_text)"></div>
+                </div>
                 
                 <!-- 推荐说明 -->
                 <div v-if="card.data.recommendation" class="recommendation-box">
@@ -287,6 +316,14 @@ export default {
     visualizationCards: { type: Array, default: () => [] },
     loading: { type: Boolean, default: false } 
   },
+  emits: ['remove-card', 'remove-dupont-card', 'generate-comprehensive-analysis'],
+  data() {
+    return {
+      selectionMode: false,
+      selectedCards: [],
+      generatingAnalysis: false
+    }
+  },
   computed: {
     status() {
       if (this.loading) return 'loading';
@@ -368,6 +405,13 @@ export default {
             }, 200);
             return;
           }
+          
+          // 处理雷达图
+          if (chartConfig.chart_type === 'radar' || (chartConfig.traces && chartConfig.traces[0]?.type === 'scatterpolar')) {
+            this.renderRadarChart(chartElementId, chartConfig);
+            return;
+          }
+          
           const traces = chartConfig.traces.map(trace => {
             const plotlyTrace = { 
               type: trace.type || 'scatter', 
@@ -442,6 +486,82 @@ export default {
         }
       });
     },
+    renderRadarChart(chartElementId, chartConfig) {
+      try {
+        const trace = chartConfig.traces[0];
+        const layout = chartConfig.layout || {};
+        
+        // 构建Plotly雷达图数据
+        const plotlyTrace = {
+          type: 'scatterpolar',
+          r: trace.r || [],
+          theta: trace.theta || [],
+          fill: trace.fill || 'toself',
+          mode: trace.mode || 'lines+markers',
+          name: trace.name || '综合能力',
+          line: trace.line || { color: 'rgb(55, 128, 191)', width: 2 },
+          marker: trace.marker || { size: 6, color: 'rgb(55, 128, 191)' }
+        };
+        
+        // 构建布局（优化大小和位置，适配卡片）
+        const plotlyLayout = {
+          polar: layout.polar || {
+            radialaxis: {
+              visible: true,
+              range: [0, 100],
+              tickmode: 'linear',
+              tick0: 0,
+              dtick: 20,
+              tickfont: { size: 10 },
+              gridcolor: '#e0e0e0',
+              linecolor: '#999'
+            },
+            angularaxis: {
+              rotation: 90,
+              direction: 'counterclockwise',
+              tickfont: { size: 11 }
+            }
+          },
+          title: {
+            text: layout.title || '综合能力分析雷达图',
+            font: { size: 14, color: '#333' },
+            x: 0.5,
+            xanchor: 'center'
+          },
+          height: 350,  // 减小高度，适配卡片
+          margin: { t: 50, r: 50, b: 50, l: 50 },  // 减小边距
+          showlegend: layout.showlegend !== false,
+          template: layout.template || 'plotly_white',
+          paper_bgcolor: 'rgba(0,0,0,0)',
+          plot_bgcolor: 'rgba(0,0,0,0)'
+        };
+        
+        const config = {
+          responsive: true,
+          displayModeBar: false,  // 隐藏工具栏，节省空间
+          displaylogo: false
+        };
+        
+        // 清理旧图表
+        try {
+          const existingChart = document.getElementById(chartElementId);
+          if (existingChart && existingChart.data) {
+            window.Plotly.purge(chartElementId);
+          }
+        } catch (e) {
+          // 忽略清理错误
+        }
+        
+        window.Plotly.newPlot(chartElementId, [plotlyTrace], plotlyLayout, config);
+        console.log(`✅ 雷达图渲染成功: ${chartElementId}`);
+      } catch (error) {
+        console.error('渲染雷达图失败:', error);
+        const chartDiv = document.getElementById(chartElementId);
+        if (chartDiv) {
+          chartDiv.innerHTML = '<div class="error-message"><p>雷达图渲染失败: ' + error.message + '</p></div>';
+        }
+      }
+    },
     getInsightIcon(type) {
       const icons = {
         'trend': '📈',
@@ -467,10 +587,74 @@ export default {
         'waterfall': '瀑布图',
         'funnel': '漏斗图',
         'gauge': '仪表盘',
-        'table': '表格'
+        'table': '表格',
+        'radar': '雷达图'
       };
       return names[type] || type;
+    },
+    formatAnalysisText(text) {
+      if (!text) return '';
+      // 将Markdown格式转换为HTML
+      if (typeof marked !== 'undefined' && marked && marked.parse) {
+        return marked.parse(text);
+      }
+      // 简单的文本格式化
+      return text
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
+    },
+    toggleSelectionMode() {
+      this.selectionMode = !this.selectionMode
+      if (!this.selectionMode) {
+        this.selectedCards = []
+      }
+    },
+    handleCardClick(cardId) {
+      if (!this.selectionMode) return
+      
+      const index = this.selectedCards.indexOf(cardId)
+      if (index > -1) {
+        this.selectedCards.splice(index, 1)
+      } else {
+        this.selectedCards.push(cardId)
+      }
+    },
+    isCardSelected(cardId) {
+      return this.selectedCards.includes(cardId)
+    },
+    async generateComprehensiveAnalysis() {
+      if (this.selectedCards.length === 0) {
+        return
+      }
+      
+      this.generatingAnalysis = true
+      try {
+        // 获取选中的卡片数据
+        const selectedCardsData = this.visualizationCards.filter(card => 
+          this.selectedCards.includes(card.id)
+        )
+        
+        // 触发事件，传递选中的卡片数据
+        this.$emit('generate-comprehensive-analysis', selectedCardsData)
+      } catch (error) {
+        console.error('生成总分析失败:', error)
+        this.generatingAnalysis = false
+      }
+      // 注意：成功时generatingAnalysis会在父组件处理完成后重置
+    },
+    resetSelection() {
+      // 重置选择状态（由父组件调用）
+      this.selectedCards = []
+      this.generatingAnalysis = false
     }
+  },
+  mounted() {
+    // 监听重置选择事件
+    window.addEventListener('reset-viz-selection', this.resetSelection)
+  },
+  beforeUnmount() {
+    // 清理事件监听
+    window.removeEventListener('reset-viz-selection', this.resetSelection)
   },
   watch: {
     chartData: { 
@@ -521,3 +705,121 @@ export default {
   }
 }
 </script>
+
+<style scoped>
+.viz-controls {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 4px 6px;
+  background: #f9fafb;
+  border-radius: 4px;
+  border: 1px solid #e5e7eb;
+}
+
+.toggle-select-btn {
+  padding: 4px 10px;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: #374151;
+  transition: all 0.2s;
+  line-height: 1.2;
+}
+
+.toggle-select-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.toggle-select-btn.active {
+  background: #0284c7;
+  color: white;
+  border-color: #0284c7;
+}
+
+.generate-analysis-btn {
+  padding: 4px 10px;
+  background: #10b981;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  line-height: 1.2;
+}
+
+.generate-analysis-btn:hover:not(:disabled) {
+  background: #059669;
+}
+
+.generate-analysis-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.viz-card.selectable {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.viz-card.selectable:hover {
+  border-color: #0284c7;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.15);
+}
+
+.viz-card.selected {
+  border: 2px solid #0284c7;
+  background: #f0f9ff;
+  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.2);
+}
+
+.selection-checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 2px solid #d1d5db;
+  border-radius: 4px;
+  margin-right: 8px;
+  background: white;
+  transition: all 0.2s;
+}
+
+.selection-checkbox.checked {
+  background: #0284c7;
+  border-color: #0284c7;
+  color: white;
+  font-weight: bold;
+}
+
+.analysis-text-box {
+  margin-top: 16px;
+  padding: 12px;
+  background: #f0f9ff;
+  border-left: 4px solid #0284c7;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: #0c4a6e;
+}
+
+.analysis-text-box :deep(strong) {
+  color: #0284c7;
+  font-weight: 600;
+}
+
+.analysis-text-box :deep(ul) {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.analysis-text-box :deep(li) {
+  margin: 4px 0;
+}
+</style>

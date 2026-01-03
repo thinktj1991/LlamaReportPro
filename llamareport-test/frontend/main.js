@@ -733,17 +733,88 @@ const App = {
         visualizationCards.value = visualizationCards.value.filter(card => card.type !== 'dupont')
         dupontData.value = null
       },
+      handleGenerateComprehensiveAnalysis: async (selectedCards) => {
+        // 处理生成总分析请求
+        showMessage('loading', '正在生成总分析雷达图...')
+        visualizationLoading.value = true
+        
+        try {
+          const response = await fetch('/query/comprehensive-analysis', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              selected_cards: selectedCards.map(card => ({
+                id: card.id,
+                question: card.question,
+                data: card.data
+              })),
+              overview_data: quickOverviewData.value,  // 传递财务概况数据
+              context_filter: selectedFile.value ? {
+                filename: selectedFile.value.filename
+              } : null
+            })
+          })
+          
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ detail: '请求失败' }))
+            const errorMsg = errorData.detail || errorData.error || `HTTP ${response.status}`
+            showMessage('error', `生成总分析失败: ${errorMsg}`)
+            visualizationLoading.value = false
+            // 重置选择状态
+            window.dispatchEvent(new CustomEvent('reset-viz-selection'))
+            return
+          }
+          
+          const result = await response.json()
+          
+          if (result.status === 'success' && result.visualization) {
+            // 添加总分析雷达图卡片
+            const cardId = Date.now().toString()
+            visualizationCards.value.push({
+              id: cardId,
+              question: '综合能力分析雷达图',
+              timestamp: new Date(),
+              data: result.visualization,
+              type: 'chart'
+            })
+            showMessage('success', '✅ 总分析雷达图已生成')
+            visualizationLoading.value = false
+            
+            // 重置选择状态，允许再次选择
+            window.dispatchEvent(new CustomEvent('reset-viz-selection'))
+          } else {
+            const errorMsg = result.error || result.detail || '生成失败'
+            showMessage('error', `生成总分析失败: ${errorMsg}`)
+            visualizationLoading.value = false
+            // 重置选择状态
+            window.dispatchEvent(new CustomEvent('reset-viz-selection'))
+          }
+        } catch (error) {
+          console.error('生成总分析错误:', error)
+          const errorMsg = error.message || '网络错误或服务器无响应'
+          showMessage('error', `生成总分析失败: ${errorMsg}`)
+          visualizationLoading.value = false
+          // 重置选择状态
+          window.dispatchEvent(new CustomEvent('reset-viz-selection'))
+        }
+      },
       handleMetricClick: async (metricInfo) => {
         // 处理指标点击事件，生成可视化
         const { metricName, metricData } = metricInfo
         const metricValue = typeof metricData === 'object' ? metricData.value : metricData
         
-        // 构建查询问题
+        // 构建查询问题（针对不同指标优化查询）
         let question = ''
         if (metricName === 'ROE') {
-          question = `请展示${metricName}（加权平均净资产收益率）的可视化图表，当前值为${metricValue}`
+          question = `请展示${metricName}（加权平均净资产收益率）的可视化图表，当前值为${metricValue}。请提供最近3-5年的ROE数据用于绘制趋势图。`
+        } else if (metricName === '营业收入') {
+          question = `请展示${metricName}的可视化图表，当前值为${metricValue}。请提供最近3-5年的营业收入数据，包括各年度的具体数值，用于绘制趋势图或柱状图。`
+        } else if (metricName === '净利润') {
+          question = `请展示${metricName}的可视化图表，当前值为${metricValue}。请提供最近3-5年的净利润数据，包括各年度的具体数值，用于绘制趋势图。`
+        } else if (metricName === '资产总额') {
+          question = `请展示${metricName}的可视化图表，当前值为${metricValue}。请提供最近3-5年的资产总额数据，包括各年度的具体数值，用于绘制趋势图。`
         } else {
-          question = `请展示${metricName}的可视化图表，当前值为${metricValue}`
+          question = `请展示${metricName}的可视化图表，当前值为${metricValue}。请提供最近3-5年的历史数据，包括各年度的具体数值，用于绘制图表。`
         }
         
         // 显示加载提示
@@ -836,7 +907,7 @@ const App = {
             <ChatArea :messages="chatMessages" :loading="queryLoading" :suggestions="suggestions" @send-message="handleSendMessage" @agent-query="handleAgentQuery" @agent-analysis="goToAgentAnalysis" @dupont-analysis="handleDupontAnalysis" @get-suggestions="handleGetSuggestions" @clear-chat="handleClearChat" @delete-message="handleDeleteMessage" />
           </section>
           <aside class="right-panel">
-            <VisualizationPanel :chart-data="visualizationData" :dupont-data="dupontData" :visualization-cards="visualizationCards" :loading="visualizationLoading || dupontLoading" @remove-card="handleRemoveVizCard" @remove-dupont-card="handleRemoveDupontCard" />
+            <VisualizationPanel :chart-data="visualizationData" :dupont-data="dupontData" :visualization-cards="visualizationCards" :loading="visualizationLoading || dupontLoading" @remove-card="handleRemoveVizCard" @remove-dupont-card="handleRemoveDupontCard" @generate-comprehensive-analysis="handleGenerateComprehensiveAnalysis" />
           </aside>
         </main>
         <MessageToast :message="message" />

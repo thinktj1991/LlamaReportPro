@@ -5,7 +5,7 @@
 from typing import Dict, Any, Optional, List
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import logging
 from decimal import Decimal
 from datetime import datetime
@@ -15,6 +15,9 @@ from agents.visualization_agent import VisualizationAgent
 from models.report_models import FinancialSnapshot, KeyFinancialMetric
 from agents.report_tools import retrieve_financial_data
 from agents.dupont_tools import parse_financial_data_response, extract_financial_data_for_dupont, generate_dupont_analysis
+import re
+from typing import Dict, Any, Optional, List
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +99,12 @@ async def ask_question(request: QueryRequest):
         if request.enable_visualization:
             try:
                 viz_agent = VisualizationAgent()
+                
+                # 记录查询和回答信息，便于调试
+                logger.info(f"📊 开始生成可视化 - 查询: {question[:100]}...")
+                logger.info(f"📊 回答长度: {len(result.get('answer', ''))} 字符")
+                logger.info(f"📊 来源数量: {len(result.get('sources', []))}")
+                
                 viz_result = await viz_agent.generate_visualization(
                     query=question,
                     answer=result['answer'],
@@ -105,9 +114,17 @@ async def ask_question(request: QueryRequest):
                 # 添加可视化数据到响应
                 response['visualization'] = viz_result.model_dump()
                 logger.info(f"✅ 可视化生成成功: {viz_result.has_visualization}")
+                
+                # 如果可视化生成失败，记录详细信息
+                if not viz_result.has_visualization:
+                    logger.warning(f"⚠️ 可视化生成失败 - 查询: {question}")
+                    logger.warning(f"⚠️ 回答预览: {result.get('answer', '')[:200]}...")
+                    logger.warning(f"⚠️ 来源预览: {[s.get('text', '')[:100] for s in result.get('sources', [])[:3]]}")
 
             except Exception as viz_error:
                 logger.warning(f"可视化生成失败: {str(viz_error)}")
+                import traceback
+                logger.warning(f"详细错误: {traceback.format_exc()}")
                 response['visualization'] = {
                     "has_visualization": False,
                     "error": str(viz_error)
@@ -2075,3 +2092,780 @@ async def get_quick_overview():
                 "missing_fields": ["所有字段"]
             }
         })
+
+class ComprehensiveAnalysisRequest(BaseModel):
+    """综合能力分析请求"""
+    selected_cards: List[Dict[str, Any]] = Field(description="选中的可视化卡片列表")
+    overview_data: Optional[Dict[str, Any]] = Field(default=None, description="财务概况数据")
+    context_filter: Optional[Dict[str, Any]] = None
+
+@router.post("/comprehensive-analysis")
+async def generate_comprehensive_analysis(request: ComprehensiveAnalysisRequest):
+    """
+    生成综合能力分析雷达图
+    
+    基于选中的可视化卡片，提取4个核心指标并生成雷达图：
+    1. 盈利能力：ROE
+    2. 运营能力：总资产周转率
+    3. 成长能力：营业收入同比增长率
+    4. 现金能力：经营活动现金流/净利润
+    
+    Returns:
+        包含雷达图配置的可视化响应
+    """
+    try:
+        logger.info("收到综合能力分析请求")
+        
+        # 获取RAG引擎
+        rag_engine = get_rag_engine()
+        
+        if not rag_engine.query_engine:
+            if not rag_engine.load_existing_index():
+                raise HTTPException(
+                    status_code=400,
+                    detail="索引未构建，请先处理文档"
+                )
+        
+        # 从选中的卡片中提取已有指标
+        existing_metrics = {}
+        for card in request.selected_cards:
+            question = card.get('question', '')
+            # 尝试从问题中识别指标
+            if 'ROE' in question or '净资产收益率' in question:
+                existing_metrics['roe'] = card
+            elif '营业收入' in question:
+                existing_metrics['revenue'] = card
+            elif '净利润' in question:
+                existing_metrics['net_profit'] = card
+            elif '资产' in question and '总额' in question:
+                existing_metrics['total_assets'] = card
+        
+        # 提取4个核心指标（已取消偿债能力）
+        # 优先使用财务概况数据
+        metrics = await _extract_core_metrics(
+            rag_engine,
+            existing_metrics,
+            request.context_filter,
+            request.overview_data
+        )
+        
+        # 计算评分
+        scores = _calculate_ability_scores(metrics)
+        
+        # 生成雷达图配置
+        radar_chart = _generate_radar_chart(scores, metrics)
+        
+        # 生成能力解释文本
+        analysis_text = _generate_ability_analysis(scores, metrics)
+        
+        # 构建可视化响应
+        visualization_response = {
+            "has_visualization": True,
+            "chart_config": radar_chart,
+            "analysis_text": analysis_text,
+            "scores": scores,
+            "metrics": metrics
+        }
+        
+        logger.info("✅ 综合能力分析生成成功")
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "visualization": visualization_response
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"生成综合能力分析失败: {str(e)}")
+        import traceback
+        logger.error(f"详细错误: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"生成综合能力分析失败: {str(e)}"
+        )
+
+
+# ==================== 综合能力分析辅助函数 ====================
+
+async def _extract_core_metrics(rag_engine, existing_metrics: Dict, context_filter: Optional[Dict] = None, overview_data: Optional[Dict] = None) -> Dict[str, Any]:
+    """
+    提取4个核心指标（已取消偿债能力）
+    
+    Returns:
+        {
+            'roe': {'value': 10.5, 'unit': '%', 'source': 'existing'},
+            'asset_turnover': {'value': 0.8, 'unit': '', 'source': 'retrieved'},
+            'revenue_growth': {'value': 15.2, 'unit': '%', 'source': 'retrieved'},
+            'cash_profit_ratio': {'value': 1.1, 'unit': '', 'source': 'retrieved'}
+        }
+    """
+    metrics = {}
+    
+    # 1. ROE - 盈利能力（优先使用财务概况数据）
+    roe_value = None
+    roe_source = None
+    
+    # 优先级1: 财务概况数据
+    if overview_data and overview_data.get('roe'):
+        roe_obj = overview_data['roe']
+        if isinstance(roe_obj, dict) and not roe_obj.get('is_missing'):
+            roe_value_str = roe_obj.get('value', '')
+            if roe_value_str and roe_value_str != '—':
+                # 提取数值（去除%和单位）
+                roe_value = _parse_metric_value(roe_value_str)
+                roe_source = 'overview'
+                logger.info(f"✅ 从财务概况获取ROE: {roe_value}%")
+    
+    # 优先级2: 已有卡片
+    if roe_value is None and 'roe' in existing_metrics:
+        roe_value = _extract_value_from_card(existing_metrics['roe'], ['ROE', '净资产收益率', '加权平均净资产收益率'])
+        if roe_value is not None:
+            roe_source = 'existing_card'
+            logger.info(f"✅ 从已有卡片获取ROE: {roe_value}%")
+    
+    # 优先级3: 从文档检索
+    if roe_value is None:
+        roe_value = await _retrieve_metric(rag_engine, "加权平均净资产收益率 ROE", context_filter)
+        roe_source = 'retrieved'
+        logger.info(f"{'✅' if roe_value else '❌'} 从文档检索ROE: {roe_value}%")
+    
+    metrics['roe'] = {'value': roe_value, 'unit': '%', 'source': roe_source}
+    print(f"📊 [指标提取] ROE: {roe_value}% (来源: {roe_source})")
+    
+    # 2. 总资产周转率 - 运营能力
+    asset_turnover = await _retrieve_metric(rag_engine, "总资产周转率 资产周转率", context_filter)
+    metrics['asset_turnover'] = {'value': asset_turnover, 'unit': '', 'source': 'retrieved'}
+    print(f"📊 [指标提取] 总资产周转率: {asset_turnover} (来源: retrieved)")
+    
+    # 3. 营业收入同比增长率 - 成长能力
+    revenue_growth = None
+    revenue_growth_source = None
+    
+    # 优先级1: 直接检索同比增长率
+    revenue_growth = await _retrieve_metric(rag_engine, "营业收入同比增长率 营业收入增长率 同比 增长", context_filter)
+    if revenue_growth is not None:
+        revenue_growth_source = 'retrieved_direct'
+        logger.info(f"✅ 直接检索到营业收入同比增长率: {revenue_growth}%")
+        print(f"📊 [指标提取] 营业收入同比增长率: {revenue_growth}% (来源: 直接检索)")
+    else:
+        # 优先级2: 从财务概况获取当前年营业收入，然后检索上一年营业收入计算增长率
+        current_revenue = None
+        previous_revenue = None
+        
+        # 从财务概况获取当前年营业收入
+        if overview_data and overview_data.get('revenue'):
+            revenue_obj = overview_data['revenue']
+            if isinstance(revenue_obj, dict) and not revenue_obj.get('is_missing'):
+                revenue_value_str = revenue_obj.get('value', '')
+                if revenue_value_str and revenue_value_str != '—':
+                    current_revenue = _parse_metric_value(revenue_value_str)
+                    logger.info(f"✅ 从财务概况获取当前年营业收入: {current_revenue}")
+                    print(f"   📊 当前年营业收入: {current_revenue}")
+        
+        # 如果还没有当前年数据，检索当前年营业收入
+        if current_revenue is None:
+            current_revenue = await _retrieve_metric(rag_engine, "营业收入 营业总收入 最新年度 本年", context_filter)
+            if current_revenue:
+                logger.info(f"✅ 检索到当前年营业收入: {current_revenue}")
+                print(f"   📊 当前年营业收入: {current_revenue}")
+        
+        # 检索上一年营业收入
+        if current_revenue is not None:
+            # 尝试多种方式检索上一年数据
+            previous_revenue = None
+            
+            # 方式1: 直接检索上一年
+            previous_revenue = await _retrieve_metric(rag_engine, "营业收入 营业总收入 上一年 去年 前一年 上年", context_filter)
+            
+            # 方式2: 如果方式1失败，尝试从表格中提取（通常利润表会有多列数据）
+            if previous_revenue is None:
+                # 构建查询，要求返回两年的数据
+                growth_query = "营业收入 营业总收入 利润表 最近两年 历史数据"
+                if context_filter:
+                    growth_result = rag_engine.query(growth_query, context_filter)
+                    growth_answer = growth_result.get('answer', '')
+                    growth_sources = growth_result.get('sources', [])
+                else:
+                    growth_response = rag_engine.query_engine.query(growth_query)
+                    growth_answer = str(growth_response)
+                    growth_sources = []
+                
+                # 从回答或来源中提取两年的数据
+                # 查找所有营业收入数值，取第二大的作为上一年（假设最大的当前年）
+                import re
+                all_revenue_values = []
+                
+                # 从sources中提取
+                for source in growth_sources:
+                    if isinstance(source, dict):
+                        source_text = source.get('text', '')
+                        # 查找包含营业收入的行
+                        for line in source_text.split('\n'):
+                            if '营业收入' in line or '营业总收入' in line:
+                                # 提取所有数值
+                                numbers = re.findall(r'([-+]?\d+[,，]?\d*\.?\d*)', line)
+                                for num_str in numbers:
+                                    try:
+                                        num = float(num_str.replace(',', '').replace('，', ''))
+                                        if not (2000 <= abs(num) <= 2030) and abs(num) > 0.01:
+                                            all_revenue_values.append(num)
+                                    except:
+                                        pass
+                
+                # 从回答中提取
+                numbers = re.findall(r'([-+]?\d+[,，]?\d*\.?\d*)\s*[万千百十亿]?元', growth_answer)
+                for num_str in numbers:
+                    try:
+                        num = float(num_str.replace(',', '').replace('，', ''))
+                        if not (2000 <= abs(num) <= 2030) and abs(num) > 0.01:
+                            all_revenue_values.append(num)
+                    except:
+                        pass
+                
+                if len(all_revenue_values) >= 2:
+                    # 排序，取第二大的作为上一年
+                    all_revenue_values = sorted([abs(v) for v in all_revenue_values], reverse=True)
+                    # 假设当前年营业收入是最大的，上一年是第二大的
+                    if abs(current_revenue) == all_revenue_values[0]:
+                        previous_revenue = all_revenue_values[1] if len(all_revenue_values) > 1 else None
+                    else:
+                        # 如果当前年不是最大的，取第二大的
+                        previous_revenue = all_revenue_values[1] if len(all_revenue_values) > 1 else all_revenue_values[0]
+                    
+                    if previous_revenue:
+                        logger.info(f"✅ 从历史数据中提取到上一年营业收入: {previous_revenue}")
+                        print(f"   📊 上一年营业收入: {previous_revenue} (从历史数据提取)")
+            
+            if previous_revenue is not None and previous_revenue != 0:
+                # 计算同比增长率
+                revenue_growth = ((current_revenue - previous_revenue) / previous_revenue) * 100
+                revenue_growth_source = 'calculated'
+                logger.info(f"✅ 计算营业收入同比增长率: {revenue_growth:.2f}% (当前: {current_revenue}, 上年: {previous_revenue})")
+                print(f"📊 [指标提取] 营业收入同比增长率: {revenue_growth:.2f}% (来源: 计算)")
+                print(f"   详细: 当前年={current_revenue}, 上一年={previous_revenue}, 增长率={revenue_growth:.2f}%")
+            else:
+                logger.warning(f"❌ 无法获取上一年营业收入，无法计算增长率")
+                print(f"   ⚠️ 无法获取上一年营业收入，无法计算增长率")
+        else:
+            logger.warning(f"❌ 无法获取当前年营业收入")
+            print(f"   ⚠️ 无法获取当前年营业收入")
+    
+    metrics['revenue_growth'] = {'value': revenue_growth, 'unit': '%', 'source': revenue_growth_source or 'missing'}
+    if revenue_growth is None:
+        print(f"📊 [指标提取] 营业收入同比增长率: 缺失")
+    
+    # 4. 经营活动现金流/净利润 - 现金能力
+    # 优先从财务概况获取净利润
+    net_profit = None
+    net_profit_source = None
+    
+    if overview_data and overview_data.get('net_profit'):
+        net_profit_obj = overview_data['net_profit']
+        if isinstance(net_profit_obj, dict) and not net_profit_obj.get('is_missing'):
+            net_profit_str = net_profit_obj.get('value', '')
+            if net_profit_str and net_profit_str != '—':
+                net_profit = _parse_metric_value(net_profit_str)
+                net_profit_source = 'overview'
+                logger.info(f"✅ 从财务概况获取净利润: {net_profit}")
+                print(f"   📊 净利润: {net_profit} (来源: 财务概况)")
+    
+    if net_profit is None:
+        net_profit = await _retrieve_metric(rag_engine, "净利润 归属于母公司所有者的净利润 归母净利润", context_filter)
+        net_profit_source = 'retrieved'
+        logger.info(f"{'✅' if net_profit else '❌'} 从文档检索净利润: {net_profit}")
+        if net_profit:
+            print(f"   📊 净利润: {net_profit} (来源: 文档检索)")
+        else:
+            print(f"   ❌ 净利润检索失败")
+    
+    # 经营活动现金流 - 使用多个关键词组合检索
+    cash_flow = None
+    cash_flow_source = None
+    
+    # 尝试多个查询策略
+    cash_flow_queries = [
+        "经营活动产生的现金流量净额",
+        "经营活动现金流 经营活动产生的现金流量",
+        "现金流量表 经营活动 现金流量净额",
+        "现金流量净额 经营活动"
+    ]
+    
+    for query in cash_flow_queries:
+        cash_flow = await _retrieve_metric(rag_engine, query, context_filter)
+        if cash_flow is not None:
+            cash_flow_source = 'retrieved'
+            logger.info(f"✅ 检索到经营活动现金流: {cash_flow} (查询: {query})")
+            print(f"📊 [指标提取] 经营活动现金流: {cash_flow} (来源: 文档检索, 查询: {query})")
+            break
+    
+    if cash_flow is None:
+        logger.warning(f"❌ 所有查询策略都未能检索到经营活动现金流")
+        print(f"📊 [指标提取] 经营活动现金流: 缺失 (所有查询策略都失败)")
+        print(f"   ⚠️ 请检查文档中是否包含以下关键词之一:")
+        print(f"      - 经营活动产生的现金流量净额")
+        print(f"      - 经营活动现金流")
+        print(f"      - 经营活动产生的现金流量")
+    
+    # 计算现金流/净利润比率
+    if cash_flow is not None and net_profit is not None and net_profit != 0:
+        # 注意：这里假设现金流和净利润的单位已经一致（都是元）
+        # 如果单位不一致，需要转换
+        cash_ratio = cash_flow / net_profit
+        metrics['cash_profit_ratio'] = {'value': cash_ratio, 'unit': '', 'source': 'calculated'}
+        print(f"📊 [指标提取] 现金流/净利润: {cash_ratio:.2f} (来源: 计算)")
+        print(f"   详细: 现金流={cash_flow}, 净利润={net_profit}, 比率={cash_ratio:.2f}")
+    else:
+        metrics['cash_profit_ratio'] = {'value': None, 'unit': '', 'source': 'missing'}
+        print(f"📊 [指标提取] 现金流/净利润: 缺失")
+        if cash_flow is None:
+            print(f"   原因: 经营活动现金流检索失败")
+        if net_profit is None:
+            print(f"   原因: 净利润检索失败")
+        elif net_profit == 0:
+            print(f"   原因: 净利润为0，无法计算比率")
+    
+    # 注意：已取消偿债能力维度（资产负债率）
+    
+    print(f"\n📋 [指标提取汇总]")
+    print(f"  - ROE: {metrics['roe']['value']}% (来源: {metrics['roe']['source']})")
+    print(f"  - 总资产周转率: {metrics['asset_turnover']['value']} (来源: {metrics['asset_turnover']['source']})")
+    print(f"  - 营业收入同比增长率: {metrics['revenue_growth']['value']}% (来源: {metrics['revenue_growth']['source']})")
+    print(f"  - 现金流/净利润: {metrics['cash_profit_ratio']['value']} (来源: {metrics['cash_profit_ratio']['source']})")
+    
+    return metrics
+
+
+def _parse_metric_value(value_str: str) -> Optional[float]:
+    """解析指标值字符串，提取数值"""
+    try:
+        if not value_str or value_str == '—':
+            return None
+        # 移除所有非数字字符（保留小数点和负号）
+        import re
+        # 匹配数字（包括小数和百分比）
+        match = re.search(r'([-+]?\d+\.?\d*)', str(value_str).replace(',', '').replace('，', ''))
+        if match:
+            return float(match.group(1))
+        return None
+    except Exception as e:
+        logger.warning(f"解析指标值失败 {value_str}: {str(e)}")
+        return None
+
+
+def _extract_value_from_card(card: Dict, keywords: List[str]) -> Optional[float]:
+    """从已有卡片中提取指标值"""
+    try:
+        # 检查卡片数据
+        card_data = card.get('data', {})
+        question = card.get('question', '')
+        
+        # 尝试从图表配置中提取
+        if card_data.get('chart_config'):
+            chart_config = card_data['chart_config']
+            # 从traces中提取数值
+            for trace in chart_config.get('traces', []):
+                if trace.get('y'):
+                    values = trace['y']
+                    if values and len(values) > 0:
+                        # 取第一个值
+                        return float(values[0])
+        
+        # 尝试从问题文本中提取
+        for keyword in keywords:
+            if keyword in question:
+                # 在问题中查找数值
+                percent_match = re.search(r'([\d,\.]+)\s*%', question)
+                if percent_match:
+                    return float(percent_match.group(1).replace(',', ''))
+                number_match = re.search(r'([\d,\.]+)', question)
+                if number_match:
+                    return float(number_match.group(1).replace(',', ''))
+        
+        return None
+    except Exception as e:
+        logger.warning(f"从卡片提取值失败: {str(e)}")
+        return None
+
+
+async def _retrieve_metric(rag_engine, query_keywords: str, context_filter: Optional[Dict] = None) -> Optional[float]:
+    """从文档中检索指标值（优化版，支持从表格和文本中提取）"""
+    try:
+        # 构建更明确的查询问题
+        query_question = f"{query_keywords}的具体数值是多少？请给出准确的数值和单位"
+        
+        if context_filter:
+            result = rag_engine.query(query_question, context_filter)
+            answer = result.get('answer', '')
+            sources = result.get('sources', [])
+        else:
+            response = rag_engine.query_engine.query(query_question)
+            answer = str(response)
+            sources = []
+        
+        logger.info(f"🔍 检索指标 '{query_keywords}' - 回答长度: {len(answer)} 字符")
+        print(f"🔍 [检索指标] {query_keywords}")
+        print(f"   回答预览: {answer[:300]}...")
+        
+        if sources:
+            logger.info(f"🔍 来源数量: {len(sources)}")
+            print(f"   来源数量: {len(sources)}")
+            # 记录来源预览
+            for i, source in enumerate(sources[:2]):
+                if isinstance(source, dict):
+                    source_text = source.get('text', '')[:200]
+                    metadata = source.get('metadata', {})
+                    doc_type = metadata.get('document_type', 'unknown')
+                    print(f"   来源{i+1} ({doc_type}): {source_text}...")
+        
+        # 优先从sources中提取（特别是表格数据）
+        if sources:
+            for source in sources:
+                if isinstance(source, dict):
+                    source_text = source.get('text', '')
+                    metadata = source.get('metadata', {})
+                    # 检查是否是表格数据
+                    is_table = metadata.get('document_type') == 'table_data' or 'table' in str(metadata).lower()
+                    
+                    # 对于经营现金流，特别关注包含相关关键词的来源
+                    keywords_in_text = any(kw in source_text for kw in ['经营活动', '现金流量', '现金流', '现金流量净额'])
+                    
+                    # 检查是否包含查询关键词
+                    query_keywords_list = query_keywords.split()
+                    has_query_keywords = any(kw in source_text for kw in query_keywords_list)
+                    
+                    if is_table or keywords_in_text or has_query_keywords:
+                        # 从表格文本中提取数值
+                        # 查找包含关键词的行
+                        lines = source_text.split('\n')
+                        for line in lines:
+                            # 检查这一行是否包含查询关键词
+                            line_has_keywords = any(kw in line for kw in query_keywords_list) or \
+                                               any(kw in line for kw in ['经营活动', '现金流量', '现金流', '营业收入', '收入', '同比', '增长'])
+                            
+                            if line_has_keywords:
+                                # 尝试从这一行提取数值
+                                # 匹配各种格式：数字、带单位的数字等
+                                
+                                # 对于表格格式：| 指标名 | 2024年 | 2023年 | 数值 |
+                                # 提取所有数值，选择最大的（通常是主要指标值）
+                                table_patterns = [
+                                    r'[|]\s*([-+]?\d+[,，]?\d*\.?\d*)\s*[|]',  # 表格格式：| 数值 |
+                                    r'[|]\s*([-+]?\d+[,，]?\d*\.?\d*)\s*[万千百十亿]?元',  # 表格格式：| 数值元 |
+                                ]
+                                
+                                # 对于文本格式
+                                text_patterns = [
+                                    r'([-+]?\d+[,，]?\d*\.?\d*)\s*[万千百十亿]元',  # 带单位的金额
+                                    r'([-+]?\d+[,，]?\d*\.?\d*)\s*%',  # 百分比
+                                    r'([-+]?\d+[,，]?\d*\.?\d*)',  # 纯数字
+                                ]
+                                
+                                all_patterns = table_patterns + text_patterns
+                                
+                                for pattern in all_patterns:
+                                    matches = re.findall(pattern, line)
+                                    if matches:
+                                        # 提取所有数值
+                                        values = []
+                                        for m in matches:
+                                            try:
+                                                v_str = m.replace(',', '').replace('，', '')
+                                                v = float(v_str)
+                                                # 排除年份、页码等
+                                                if not (2000 <= abs(v) <= 2030) and abs(v) > 0.01:
+                                                    values.append(v)
+                                            except:
+                                                pass
+                                        
+                                        if values:
+                                            # 取绝对值最大的数值（通常是主要指标值）
+                                            max_value = max([abs(v) for v in values])
+                                            # 恢复符号
+                                            for v in values:
+                                                if abs(v) == max_value:
+                                                    logger.info(f"✅ 从表格来源提取到数值: {v} (行: {line[:100]}...)")
+                                                    print(f"   ✅ 从表格提取: {v} (匹配行: {line[:80]}...)")
+                                                    return v
+        
+        # 从回答中提取数值
+        # 匹配带单位的金额：如 "1,234,567万元"、"123.45亿元"
+        amount_patterns = [
+            r'([-+]?\d+[,，]?\d*\.?\d*)\s*([万千百十亿]元)',  # 带单位的金额
+            r'([-+]?\d+[,，]?\d*\.?\d*)\s*元',  # 带"元"的金额
+        ]
+        for pattern in amount_patterns:
+            match = re.search(pattern, answer)
+            if match:
+                value_str = match.group(1).replace(',', '').replace('，', '')
+                unit = match.group(2) if len(match.groups()) > 1 else ''
+                value = float(value_str)
+                # 单位转换
+                if '亿' in unit:
+                    value = value * 100000000
+                elif '万' in unit:
+                    value = value * 10000
+                elif '千' in unit:
+                    value = value * 1000
+                logger.info(f"✅ 从回答中提取到数值（带单位）: {value} ({unit})")
+                print(f"   ✅ 从回答提取（带单位）: {value} ({unit})")
+                return value
+        
+        # 匹配百分比：10.5%、10.5
+        percent_match = re.search(r'([-+]?\d+[,，]?\.?\d*)\s*%', answer)
+        if percent_match:
+            value_str = percent_match.group(1).replace(',', '').replace('，', '')
+            logger.info(f"✅ 从回答中提取到百分比: {value_str}%")
+            print(f"   ✅ 从回答提取（百分比）: {value_str}%")
+            return float(value_str)
+        
+        # 匹配普通数值（取最大的数值，通常是主要指标值）
+        number_matches = re.findall(r'([-+]?\d+[,，]?\d*\.?\d*)', answer)
+        if number_matches:
+            # 过滤掉明显不是指标值的数字（如年份、页码等）
+            values = []
+            for match in number_matches:
+                value_str = match.replace(',', '').replace('，', '')
+                try:
+                    v = float(value_str)
+                    # 排除年份（2000-2030）、页码等
+                    if not (2000 <= abs(v) <= 2030) and abs(v) > 0.01:
+                        values.append(v)
+                except:
+                    pass
+            
+            if values:
+                # 取绝对值最大的（通常是主要指标值）
+                max_value = max([abs(v) for v in values])
+                for v in values:
+                    if abs(v) == max_value:
+                        logger.info(f"✅ 从回答中提取到数值: {v}")
+                        print(f"   ✅ 从回答提取: {v}")
+                        return v
+        
+        logger.warning(f"❌ 未能从回答中提取到数值: {answer[:200]}...")
+        print(f"   ❌ 未能提取数值")
+        return None
+    except Exception as e:
+        logger.warning(f"检索指标失败 {query_keywords}: {str(e)}")
+        import traceback
+        logger.warning(f"详细错误: {traceback.format_exc()}")
+        print(f"   ❌ 检索失败: {str(e)}")
+        return None
+
+
+def _calculate_ability_scores(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    根据指标值计算能力评分（0-100分）
+    
+    Returns:
+        {
+            'profitability': {'score': 75, 'level': '中高'},
+            'operation': {'score': 60, 'level': '正常'},
+            'growth': {'score': 80, 'level': '高成长'},
+            'cash': {'score': 70, 'level': '基本匹配'},
+            'debt': {'score': 65, 'level': '合理'}
+        }
+    """
+    scores = {}
+    
+    # 1. 盈利能力 - ROE
+    roe_value = metrics.get('roe', {}).get('value')
+    if roe_value is not None:
+        if roe_value >= 15:
+            score = 80 + min(20, (roe_value - 15) * 2)  # 15-25% 映射到 80-100
+        elif roe_value >= 10:
+            score = 60 + (roe_value - 10) * 4  # 10-15% 映射到 60-80
+        elif roe_value >= 5:
+            score = 40 + (roe_value - 5) * 4  # 5-10% 映射到 40-60
+        else:
+            score = max(0, 40 * (roe_value / 5))  # 0-5% 映射到 0-40
+        scores['profitability'] = {'score': min(100, max(0, score)), 'value': roe_value}
+    else:
+        scores['profitability'] = {'score': 50, 'value': None}  # 缺失数据设为中性值
+    
+    # 2. 运营能力 - 总资产周转率
+    turnover_value = metrics.get('asset_turnover', {}).get('value')
+    if turnover_value is not None:
+        if turnover_value >= 1.2:
+            score = 80 + min(20, (turnover_value - 1.2) * 25)  # ≥1.2 映射到 80-100
+        elif turnover_value >= 0.8:
+            score = 60 + (turnover_value - 0.8) * 50  # 0.8-1.2 映射到 60-80
+        elif turnover_value >= 0.5:
+            score = 40 + (turnover_value - 0.5) * 66.67  # 0.5-0.8 映射到 40-60
+        else:
+            score = max(0, 40 * (turnover_value / 0.5))  # <0.5 映射到 0-40
+        scores['operation'] = {'score': min(100, max(0, score)), 'value': turnover_value}
+    else:
+        scores['operation'] = {'score': 50, 'value': None}
+    
+    # 3. 成长能力 - 营业收入同比增长率
+    growth_value = metrics.get('revenue_growth', {}).get('value')
+    if growth_value is not None:
+        if growth_value >= 20:
+            score = 80 + min(20, (growth_value - 20) * 1)  # ≥20% 映射到 80-100
+        elif growth_value >= 10:
+            score = 60 + (growth_value - 10) * 2  # 10-20% 映射到 60-80
+        elif growth_value >= 0:
+            score = 40 + growth_value * 2  # 0-10% 映射到 40-60
+        else:
+            score = max(0, 40 + growth_value * 4)  # 负增长 映射到 0-40
+        scores['growth'] = {'score': min(100, max(0, score)), 'value': growth_value}
+    else:
+        scores['growth'] = {'score': 50, 'value': None}
+    
+    # 4. 现金能力 - 经营活动现金流/净利润
+    cash_ratio_value = metrics.get('cash_profit_ratio', {}).get('value')
+    if cash_ratio_value is not None:
+        if cash_ratio_value >= 1.2:
+            score = 80 + min(20, (cash_ratio_value - 1.2) * 50)  # ≥1.2 映射到 80-100
+        elif cash_ratio_value >= 0.8:
+            score = 60 + (cash_ratio_value - 0.8) * 50  # 0.8-1.2 映射到 60-80
+        elif cash_ratio_value >= 0.5:
+            score = 40 + (cash_ratio_value - 0.5) * 66.67  # 0.5-0.8 映射到 40-60
+        else:
+            score = max(0, 40 * (cash_ratio_value / 0.5))  # <0.5 映射到 0-40
+        scores['cash'] = {'score': min(100, max(0, score)), 'value': cash_ratio_value}
+    else:
+        scores['cash'] = {'score': 50, 'value': None}
+    
+    # 注意：已取消偿债能力维度
+    
+    return scores
+
+
+def _generate_radar_chart(scores: Dict[str, Any], metrics: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    生成雷达图配置（Plotly格式）
+    """
+    # 能力维度标签（已取消偿债能力）
+    categories = ['盈利能力', '运营能力', '成长能力', '现金能力']
+    
+    # 获取各维度分数
+    values = [
+        scores.get('profitability', {}).get('score', 50),
+        scores.get('operation', {}).get('score', 50),
+        scores.get('growth', {}).get('score', 50),
+        scores.get('cash', {}).get('score', 50)
+    ]
+    
+    # 为了闭合雷达图，需要重复第一个值
+    categories_closed = categories + [categories[0]]
+    values_closed = values + [values[0]]
+    
+    # 构建Plotly雷达图配置
+    chart_config = {
+        "chart_type": "radar",
+        "traces": [
+            {
+                "name": "综合能力",
+                "type": "scatterpolar",
+                "r": values_closed,
+                "theta": categories_closed,
+                "fill": "toself",
+                "mode": "lines+markers",
+                "line": {"color": "rgb(55, 128, 191)", "width": 2},
+                "marker": {"size": 8, "color": "rgb(55, 128, 191)"}
+            }
+        ],
+        "layout": {
+            "title": "综合能力分析雷达图",
+            "polar": {
+                "radialaxis": {
+                    "visible": True,
+                    "range": [0, 100],
+                    "tickmode": "linear",
+                    "tick0": 0,
+                    "dtick": 20,
+                    "tickvals": [0, 20, 40, 60, 80, 100],
+                    "ticktext": ["0", "20", "40", "60", "80", "100"],
+                    "gridcolor": "#e0e0e0",
+                    "linecolor": "#999"
+                },
+                "angularaxis": {
+                    "rotation": 90,
+                    "direction": "counterclockwise"
+                }
+            },
+            "height": 500,
+            "showlegend": False,
+            "template": "plotly_white"
+        }
+    }
+    
+    return chart_config
+
+
+def _generate_ability_analysis(scores: Dict[str, Any], metrics: Dict[str, Any]) -> str:
+    """
+    生成能力分析文本
+    """
+    # 计算平均分（已取消偿债能力）
+    avg_score = sum([
+        scores.get('profitability', {}).get('score', 50),
+        scores.get('operation', {}).get('score', 50),
+        scores.get('growth', {}).get('score', 50),
+        scores.get('cash', {}).get('score', 50)
+    ]) / 4
+    
+    # 根据平均分确定整体评价
+    if avg_score >= 80:
+        overall = "能力表现较强"
+    elif avg_score >= 60:
+        overall = "能力保持稳定"
+    elif avg_score >= 40:
+        overall = "能力承压"
+    else:
+        overall = "能力风险较高"
+    
+    analysis = f"**综合能力评价：{overall}**\n\n"
+    
+    # 各维度一句话分析
+    profitability_score = scores.get('profitability', {}).get('score', 50)
+    if profitability_score >= 80:
+        profitability_desc = "盈利能力突出"
+    elif profitability_score >= 60:
+        profitability_desc = "盈利能力良好"
+    elif profitability_score >= 40:
+        profitability_desc = "盈利能力一般"
+    else:
+        profitability_desc = "盈利能力偏弱"
+    analysis += f"- **盈利能力**：{profitability_desc}\n"
+    
+    operation_score = scores.get('operation', {}).get('score', 50)
+    if operation_score >= 80:
+        operation_desc = "运营效率较高"
+    elif operation_score >= 60:
+        operation_desc = "运营效率正常"
+    elif operation_score >= 40:
+        operation_desc = "运营效率偏低"
+    else:
+        operation_desc = "运营效率较弱"
+    analysis += f"- **运营能力**：{operation_desc}\n"
+    
+    growth_score = scores.get('growth', {}).get('score', 50)
+    if growth_score >= 80:
+        growth_desc = "成长能力强劲"
+    elif growth_score >= 60:
+        growth_desc = "成长能力稳健"
+    elif growth_score >= 40:
+        growth_desc = "成长能力放缓"
+    else:
+        growth_desc = "成长能力承压"
+    analysis += f"- **成长能力**：{growth_desc}\n"
+    
+    cash_score = scores.get('cash', {}).get('score', 50)
+    if cash_score >= 80:
+        cash_desc = "现金质量优秀"
+    elif cash_score >= 60:
+        cash_desc = "现金质量良好"
+    elif cash_score >= 40:
+        cash_desc = "现金质量一般"
+    else:
+        cash_desc = "现金质量存在风险"
+    analysis += f"- **现金能力**：{cash_desc}\n"
+    
+    return analysis
