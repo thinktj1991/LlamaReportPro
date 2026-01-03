@@ -436,7 +436,7 @@ class RAGEngine:
 
                 # 提取表格中的关键财务指标（从列名中）
                 financial_indicators = []
-                common_indicators = ['营业收入', '营收', '收入', '净利润', '利润', '资产', '负债', '现金流', 
+                common_indicators = ['营业收入', '营收', '收入', '净利润', '利润', '资产', '负债', '资产总额', 
                                    'ROE', 'ROA', '毛利率', '净利率', '总资产', '净资产', '股东权益']
                 for col in columns:
                     col_str = str(col)
@@ -741,7 +741,7 @@ class RAGEngine:
         enhanced_parts.append("")
 
         # 提取关键词并强调（特别是财务指标）
-        financial_keywords = ['营业收入', '净利润', '资产', '负债', '现金流', 'ROE', 'ROA', '毛利率', '净利率']
+        financial_keywords = ['营业收入', '净利润', '资产', '负债', '资产总额', 'ROE', 'ROA', '毛利率', '净利率']
         question_keywords = []
         for keyword in financial_keywords:
             if keyword in question:
@@ -842,7 +842,7 @@ class RAGEngine:
                 if source_file not in doc_source and doc_source not in source_file:
                     match = False
             
-            # 公司名过滤
+            # 公司名过滤（使用与HybridRetriever相同的优化逻辑）
             if match and 'company' in context_filter:
                 company = context_filter['company']
                 doc_text = node.text.lower()
@@ -855,17 +855,45 @@ class RAGEngine:
                 if doc_filename:
                     import re
                     clean_filename = re.sub(r'(利润表|资产负债表|现金流量表|年报|报告|财务报表|财务报告|\d{4}年?)', '', doc_filename, flags=re.IGNORECASE)
+                    clean_filename = re.sub(r'年度\d+', '', clean_filename)  # 移除"年度60"等
                     clean_filename = re.sub(r'[_\-\s\.]+', '', clean_filename)
                     if len(clean_filename) >= 2:
                         filename_company = clean_filename
                 
-                # 检查是否匹配
-                company_found = (
-                    company_lower in doc_text or 
-                    company_lower in doc_company or
-                    (filename_company and company_lower in filename_company) or
-                    (filename_company and filename_company in company_lower)
-                )
+                # 优先使用文件名匹配（最准确）
+                company_found = False
+                
+                # 1. 优先检查文件名匹配（最严格）
+                if filename_company:
+                    # 文件名匹配：公司名应该在文件名中，或者文件名在公司名中
+                    # 使用更严格的匹配：至少匹配前3个字符
+                    if len(company_lower) >= 3 and len(filename_company) >= 3:
+                        # 检查前3个字符是否匹配
+                        if company_lower[:3] == filename_company[:3]:
+                            company_found = True
+                        # 或者检查是否包含（双向）
+                        elif company_lower in filename_company or filename_company in company_lower:
+                            company_found = True
+                    elif len(company_lower) >= 2 and len(filename_company) >= 2:
+                        # 如果公司名较短，至少匹配前2个字符
+                        if company_lower[:2] == filename_company[:2]:
+                            company_found = True
+                
+                # 2. 如果文件名匹配失败，检查文档文本和元数据
+                if not company_found:
+                    # 检查文档文本中是否包含公司名（要求至少3个字符匹配）
+                    if len(company_lower) >= 3:
+                        # 在文档文本中查找公司名（要求完整匹配，避免误匹配）
+                        import re
+                        # 构建匹配模式：公司名前后可以有标点或空格
+                        pattern = re.escape(company_lower)
+                        if re.search(pattern, doc_text):
+                            company_found = True
+                    
+                    # 检查元数据中的公司名
+                    if not company_found and doc_company:
+                        if company_lower in doc_company or doc_company in company_lower:
+                            company_found = True
                 
                 if not company_found:
                     match = False
@@ -903,7 +931,7 @@ class RAGEngine:
                 if source_file not in doc_source and doc_source not in source_file:
                     match = False
             
-            # 公司名过滤
+            # 公司名过滤（使用与HybridRetriever相同的优化逻辑）
             if match and 'company' in context_filter:
                 company = context_filter['company']
                 doc_text = source.get('text', '').lower()
@@ -916,17 +944,45 @@ class RAGEngine:
                 if doc_filename:
                     import re
                     clean_filename = re.sub(r'(利润表|资产负债表|现金流量表|年报|报告|财务报表|财务报告|\d{4}年?)', '', doc_filename, flags=re.IGNORECASE)
+                    clean_filename = re.sub(r'年度\d+', '', clean_filename)  # 移除"年度60"等
                     clean_filename = re.sub(r'[_\-\s\.]+', '', clean_filename)
                     if len(clean_filename) >= 2:
                         filename_company = clean_filename
                 
-                # 检查是否匹配
-                company_found = (
-                    company_lower in doc_text or 
-                    company_lower in doc_company or
-                    (filename_company and company_lower in filename_company) or
-                    (filename_company and filename_company in company_lower)
-                )
+                # 优先使用文件名匹配（最准确）
+                company_found = False
+                
+                # 1. 优先检查文件名匹配（最严格）
+                if filename_company:
+                    # 文件名匹配：公司名应该在文件名中，或者文件名在公司名中
+                    # 使用更严格的匹配：至少匹配前3个字符
+                    if len(company_lower) >= 3 and len(filename_company) >= 3:
+                        # 检查前3个字符是否匹配
+                        if company_lower[:3] == filename_company[:3]:
+                            company_found = True
+                        # 或者检查是否包含（双向）
+                        elif company_lower in filename_company or filename_company in company_lower:
+                            company_found = True
+                    elif len(company_lower) >= 2 and len(filename_company) >= 2:
+                        # 如果公司名较短，至少匹配前2个字符
+                        if company_lower[:2] == filename_company[:2]:
+                            company_found = True
+                
+                # 2. 如果文件名匹配失败，检查文档文本和元数据
+                if not company_found:
+                    # 检查文档文本中是否包含公司名（要求至少3个字符匹配）
+                    if len(company_lower) >= 3:
+                        # 在文档文本中查找公司名（要求完整匹配，避免误匹配）
+                        import re
+                        # 构建匹配模式：公司名前后可以有标点或空格
+                        pattern = re.escape(company_lower)
+                        if re.search(pattern, doc_text):
+                            company_found = True
+                    
+                    # 检查元数据中的公司名
+                    if not company_found and doc_company:
+                        if company_lower in doc_company or doc_company in company_lower:
+                            company_found = True
                 
                 if not company_found:
                     match = False

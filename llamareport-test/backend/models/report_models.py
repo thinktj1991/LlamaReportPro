@@ -219,7 +219,7 @@ class ReportSection(BaseModel):
 
 class KeyFinancialMetric(BaseModel):
     """关键财务指标"""
-    name: str = Field(description="指标名称，如'营业收入'、'净利润'、'经营现金流'")
+    name: str = Field(description="指标名称，如'营业收入'、'净利润'、'资产总额'")
     value: Optional[str] = Field(default=None, description="指标值，如'100亿元'、'10亿元'")
     change_rate: Optional[str] = Field(default=None, description="同比变化率，如'+20%'、'-5%'")
     change_direction: Optional[str] = Field(default=None, description="变化方向：'增长'、'下降'、'持平'")
@@ -227,12 +227,14 @@ class KeyFinancialMetric(BaseModel):
 
 
 class FinancialSnapshot(BaseModel):
-    """财务快照（用于企业概况）"""
+    """财务快照（用于财务概况）"""
     # 核心指标
+    roe: Optional[KeyFinancialMetric] = Field(default=None, description="ROE（加权平均净资产收益率）")
     revenue: Optional[KeyFinancialMetric] = Field(default=None, description="营业收入")
     net_profit: Optional[KeyFinancialMetric] = Field(default=None, description="净利润")
-    operating_cash_flow: Optional[KeyFinancialMetric] = Field(default=None, description="经营现金流")
-    asset_liability_ratio: Optional[KeyFinancialMetric] = Field(default=None, description="资产负债率")
+    total_assets: Optional[KeyFinancialMetric] = Field(default=None, description="资产总额")
+    net_interest_margin: Optional[KeyFinancialMetric] = Field(default=None, description="净息差")
+    cost_income_ratio: Optional[KeyFinancialMetric] = Field(default=None, description="成本收入比")
     
     # 一句话结论
     verdict: str = Field(description="一句话核心结论")

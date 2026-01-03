@@ -270,7 +270,7 @@ async def get_query_suggestions():
                     "公司的营业收入是多少？",
                     "净利润增长率如何？",
                     "资产负债率是多少？",
-                    "现金流状况如何？"
+                    "资产总额是多少？"
                 ]
             },
             {
@@ -334,6 +334,7 @@ async def get_query_stats():
     """
     try:
         # 获取索引统计
+        rag_engine = get_rag_engine()
         index_stats = rag_engine.get_index_stats()
         
         stats = {
@@ -356,6 +357,117 @@ async def get_query_stats():
     except Exception as e:
         logger.error(f"获取查询统计失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取查询统计失败: {str(e)}")
+
+@router.get("/index-documents")
+async def list_index_documents():
+    """
+    列出索引中的所有文档及其元数据
+    
+    Returns:
+        索引中的所有文档列表
+    """
+    try:
+        rag_engine = get_rag_engine()
+        
+        if not rag_engine.query_engine:
+            if not rag_engine.load_existing_index():
+                raise HTTPException(
+                    status_code=400,
+                    detail="索引未构建，请先处理文档"
+                )
+        
+        if not rag_engine.index:
+            return JSONResponse(status_code=200, content={
+                "message": "索引未初始化",
+                "documents": [],
+                "files": []
+            })
+        
+        # 获取所有文档
+        all_docs = rag_engine.index.docstore.docs
+        
+        # 统计文件
+        files_dict = {}
+        documents_list = []
+        
+        for doc_id, doc in all_docs.items():
+            metadata = doc.metadata or {}
+            filename = metadata.get('filename') or metadata.get('source_file', 'unknown')
+            doc_type = metadata.get('document_type', 'text')
+            
+            # 添加到文档列表
+            documents_list.append({
+                "doc_id": doc_id,
+                "filename": filename,
+                "document_type": doc_type,
+                "page_number": metadata.get('page_number'),
+                "table_id": metadata.get('table_id'),
+                "text_preview": doc.text[:200] if doc.text else "",
+                "text_length": len(doc.text) if doc.text else 0,
+                "metadata": metadata
+            })
+            
+            # 统计文件
+            if filename not in files_dict:
+                files_dict[filename] = {
+                    'count': 0,
+                    'types': set(),
+                    'sample_text': doc.text[:100] if doc.text else ''
+                }
+            files_dict[filename]['count'] += 1
+            files_dict[filename]['types'].add(doc_type)
+        
+        # 转换为列表格式
+        files_list = []
+        for filename, info in sorted(files_dict.items()):
+            files_list.append({
+                "filename": filename,
+                "document_count": info['count'],
+                "document_types": list(info['types']),
+                "sample_text": info['sample_text']
+            })
+        
+        # 检查ChromaDB集合
+        chroma_info = {}
+        if rag_engine.chroma_collection:
+            try:
+                all_data = rag_engine.chroma_collection.get()
+                if all_data and 'ids' in all_data:
+                    chroma_info = {
+                        "vector_count": len(all_data['ids']),
+                        "metadata_count": len(all_data.get('metadatas', []))
+                    }
+                    
+                    # 统计ChromaDB中的文件名
+                    metadatas = all_data.get('metadatas', [])
+                    chroma_files = {}
+                    for metadata in metadatas:
+                        if metadata:
+                            filename = metadata.get('filename') or metadata.get('source_file', 'unknown')
+                            if filename not in chroma_files:
+                                chroma_files[filename] = 0
+                            chroma_files[filename] += 1
+                    
+                    chroma_info["files"] = chroma_files
+            except Exception as e:
+                chroma_info = {"error": str(e)}
+        
+        return JSONResponse(status_code=200, content={
+            "message": f"索引中共有 {len(all_docs)} 个文档",
+            "total_documents": len(all_docs),
+            "total_files": len(files_dict),
+            "files": files_list,
+            "documents": documents_list[:100],  # 限制返回前100个文档，避免响应过大
+            "chroma_info": chroma_info
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"列出索引文档失败: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"列出索引文档失败: {str(e)}")
 
 @router.post("/feedback")
 async def submit_feedback(feedback_data: Dict[str, Any]):
@@ -687,15 +799,17 @@ async def generate_dupont_analysis_api(request: DupontAnalysisRequest):
 @router.post("/quick-overview")
 async def get_quick_overview():
     """
-    快速生成企业概况接口（结构化财务快照）
+    快速生成财务概况接口（结构化财务快照）
     
     两阶段生成：
-    1. 第一阶段：提取关键财务指标（营收、净利润、现金流、负债率）
+    1. 第一阶段：提取关键财务指标（ROE、营收、净利润、资产总额、净息差、成本收入比）
     2. 第二阶段：基于指标生成一句话结论
+    
+    注意：只检索上传文档对应公司的数据
     
     Returns:
         财务快照数据，包含：
-        - 关键指标（revenue, net_profit, operating_cash_flow, asset_liability_ratio）
+        - 关键指标（roe, revenue, net_profit, total_assets, net_interest_margin, cost_income_ratio）
         - verdict: 一句话结论
         - stage: 公司阶段（增长/稳态/下行）
         - profit_quality: 赚钱质量描述
@@ -720,193 +834,1018 @@ async def get_quick_overview():
         
         llm = Settings.llm
         
+        # ========== 第零阶段：从上传的文档中提取公司名称和年份 ==========
+        logger.info("第零阶段：从上传的文档中提取公司名称和年份...")
+        
+        company_name = None
+        year = None
+        context_filter = {}
+        uploaded_filenames = set()  # 保存上传的文件名列表，用于更严格的过滤
+        
+        try:
+            # 方法1：直接从uploads目录的文件名中提取公司名称（最准确）
+            from pathlib import Path
+            upload_dir = Path("uploads")
+            
+            if upload_dir.exists():
+                seen_companies = set()
+                seen_years = set()
+                # 遍历所有上传的文件
+                for file_path in upload_dir.iterdir():
+                    if file_path.is_file():
+                        filename = file_path.name
+                        uploaded_filenames.add(filename)  # 保存文件名
+                        # 移除文件扩展名
+                        name_without_ext = re.sub(r'\.[^.]+$', '', filename)
+                        # 移除常见的报表类型关键词
+                        name_clean = re.sub(r'(利润表|资产负债表|现金流量表|年报|报告|财务报表|财务报告)', '', name_without_ext, flags=re.IGNORECASE)
+                        
+                        # 从文件名提取年份（在移除年份之前）
+                        if not year:
+                            year_match = re.search(r'(\d{4})', filename)
+                            if year_match:
+                                candidate_year = year_match.group(1)
+                                # 验证年份合理性
+                                if 2000 <= int(candidate_year) <= 2030:
+                                    year = candidate_year
+                                    seen_years.add(year)
+                                    logger.info(f"  从文件 '{filename}' 提取到年份: {year}")
+                        
+                        # 移除年份（4位数字）
+                        name_clean = re.sub(r'\d{4}年?', '', name_clean)
+                        # 移除"年度"和后面的数字（如"年度60"）
+                        name_clean = re.sub(r'年度\d+', '', name_clean)
+                        # 移除多余的空格和特殊字符
+                        name_clean = re.sub(r'[_\-\s\.]+', '', name_clean).strip()
+                        
+                        if name_clean and len(name_clean) >= 2 and len(name_clean) <= 30:
+                            seen_companies.add(name_clean)
+                            logger.info(f"  从文件 '{filename}' 提取到公司名: {name_clean}")
+                
+                # 如果找到多个可能的公司名，选择最常见的
+                if seen_companies:
+                    from collections import Counter
+                    company_counts = Counter(seen_companies)
+                    # 选择出现次数最多的
+                    company_name = company_counts.most_common(1)[0][0]
+                    logger.info(f"✅ 从上传文件提取公司名称: {company_name} (出现 {company_counts[company_name]} 次)")
+                    logger.info(f"✅ 上传的文件列表: {list(uploaded_filenames)}")
+            
+                # 如果找到多个年份，选择最常见的（通常应该只有一个）
+                if seen_years:
+                    from collections import Counter
+                    year_counts = Counter(seen_years)
+                    year = year_counts.most_common(1)[0][0]
+                    logger.info(f"✅ 从上传文件提取年份: {year} (出现 {year_counts[year]} 次)")
+            
+            # 方法2：如果还没找到年份，从文档内容中提取
+            if not year:
+                try:
+                    if upload_dir.exists():
+                        uploaded_files = [f.name for f in upload_dir.iterdir() if f.is_file()]
+                        if uploaded_files:
+                            # 尝试从文档内容中提取年份
+                            year_query = "报告年度 年份 年度报告 报告年份"
+                            try:
+                                retriever = rag_engine.index.as_retriever(similarity_top_k=20)
+                                nodes = retriever.retrieve(year_query)
+                                
+                                # 只从当前上传的文件中提取
+                                for node in nodes:
+                                    filename = node.metadata.get('filename') or node.metadata.get('source_file', '')
+                                    if filename in uploaded_filenames:
+                                        # 从文本中提取年份
+                                        node_text = node.text
+                                        year_patterns = [
+                                            r'报告年度[：:]\s*(\d{4})',
+                                            r'(\d{4})年度',
+                                            r'(\d{4})年[度]?报告',
+                                        ]
+                                        for pattern in year_patterns:
+                                            year_match = re.search(pattern, node_text)
+                                            if year_match:
+                                                candidate_year = year_match.group(1)
+                                                # 验证年份合理性
+                                                if 2000 <= int(candidate_year) <= 2030:
+                                                    year = candidate_year
+                                                    logger.info(f"✅ 从文档内容提取年份: {year}")
+                                                    break
+                                        if year:
+                                            break
+                            except Exception as e:
+                                logger.warning(f"从文档内容提取年份失败: {str(e)}")
+                except Exception as e:
+                    logger.warning(f"提取年份失败: {str(e)}")
+            
+            # 方法3：如果还没找到，从索引中的文档元数据中提取（只从当前上传的文件）
+            if not company_name and rag_engine.index:
+                try:
+                    # 获取所有上传的文件名
+                    uploaded_filenames = set()
+                    if upload_dir.exists():
+                        uploaded_filenames = {f.name for f in upload_dir.iterdir() if f.is_file()}
+                    
+                    if uploaded_filenames:
+                        retriever = rag_engine.index.as_retriever(similarity_top_k=50)
+                        nodes = retriever.retrieve("公司名称")
+                        
+                        # 只从当前上传的文件中提取
+                        seen_companies = set()
+                        for node in nodes:
+                            filename = node.metadata.get('filename') or node.metadata.get('source_file', '')
+                            # 只处理当前上传的文件
+                            if filename in uploaded_filenames:
+                                # 移除文件扩展名
+                                name_without_ext = re.sub(r'\.[^.]+$', '', filename)
+                                # 移除常见的报表类型关键词
+                                name_clean = re.sub(r'(利润表|资产负债表|现金流量表|年报|报告|财务报表|财务报告)', '', name_without_ext, flags=re.IGNORECASE)
+                                # 移除年份
+                                name_clean = re.sub(r'\d{4}年?', '', name_clean)
+                                # 移除"年度"和后面的数字
+                                name_clean = re.sub(r'年度\d+', '', name_clean)
+                                # 移除多余的空格和特殊字符
+                                name_clean = re.sub(r'[_\-\s\.]+', '', name_clean).strip()
+                                if name_clean and len(name_clean) >= 2 and len(name_clean) <= 30:
+                                    seen_companies.add(name_clean)
+                        
+                        if seen_companies:
+                            from collections import Counter
+                            company_counts = Counter(seen_companies)
+                            company_name = company_counts.most_common(1)[0][0]
+                            logger.info(f"✅ 从索引元数据提取公司名称: {company_name}")
+                except Exception as e:
+                    logger.warning(f"从索引元数据提取公司名称失败: {str(e)}")
+            
+            # 方法3：如果还没找到，从文档内容中提取（但限制在当前上传的文件）
+            if not company_name:
+                try:
+                    # 如果有上传的文件，使用文件名作为上下文
+                    if upload_dir.exists():
+                        uploaded_files = [f.name for f in upload_dir.iterdir() if f.is_file()]
+                        if uploaded_files:
+                            files_context = "、".join(uploaded_files[:5])  # 最多5个文件名
+                            extract_query = f"请从以下文件名的文档中提取公司名称（完整的公司全称）：{files_context}。只返回公司名称，不要其他内容。"
+                        else:
+                            extract_query = "请从文档中提取公司名称（完整的公司全称），只返回公司名称，不要其他内容"
+                    else:
+                        extract_query = "请从文档中提取公司名称（完整的公司全称），只返回公司名称，不要其他内容"
+                    
+                    response = rag_engine.query_engine.query(extract_query)
+                    response_text = str(response).strip()
+                    
+                    # 尝试提取公司名称
+                    patterns = [
+                        r'([^，,。\n]{2,30}(?:股份|有限|公司|集团|银行|证券|保险))',
+                        r'公司名称[：:]\s*([^，,。\n]{2,30})',
+                        r'([A-Za-z0-9\u4e00-\u9fa5]{2,20}(?:股份|有限|公司|集团))',
+                    ]
+                    for pattern in patterns:
+                        match = re.search(pattern, response_text)
+                        if match:
+                            candidate = match.group(1).strip()
+                            # 移除"年度"和后面的数字
+                            candidate = re.sub(r'年度\d+', '', candidate).strip()
+                            if len(candidate) >= 2 and len(candidate) <= 30:
+                                company_name = candidate
+                                logger.info(f"✅ 从文档内容提取公司名称: {company_name}")
+                                break
+                except Exception as e:
+                    logger.warning(f"从文档内容提取公司名称失败: {str(e)}")
+            
+            # 如果找到了公司名称，设置context_filter
+            if company_name:
+                context_filter['company'] = company_name
+                logger.info(f"✅ 设置公司过滤条件: {company_name}")
+                
+            # 如果找到了年份，设置context_filter
+            if year:
+                context_filter['year'] = year
+                logger.info(f"✅ 设置年份过滤条件: {year}")
+                
+                # 如果找到了上传的文件名，也添加到过滤条件中（更严格的过滤）
+                if uploaded_filenames:
+                    # 注意：HybridRetriever的context_filter支持filename列表，但这里我们使用公司名过滤
+                    # 文件名过滤会在HybridRetriever内部通过公司名匹配文件名来实现
+                    logger.info(f"✅ 上传的文件数量: {len(uploaded_filenames)}")
+            else:
+                logger.warning("⚠️ 未找到公司名称，将检索所有文档")
+                # 即使没有找到公司名，如果有上传的文件名，也可以尝试使用文件名过滤
+                if uploaded_filenames and len(uploaded_filenames) == 1:
+                    # 如果只有一个文件，可以使用文件名过滤
+                    single_filename = list(uploaded_filenames)[0]
+                    context_filter['filename'] = single_filename
+                    logger.info(f"✅ 使用文件名过滤: {single_filename}")
+                
+        except Exception as e:
+            logger.warning(f"提取公司名称失败: {str(e)}，将检索所有文档")
+            import traceback
+            logger.warning(f"详细错误: {traceback.format_exc()}")
+        
+        # 记录使用的过滤条件
+        if context_filter:
+            logger.info(f"📋 检索过滤条件: {context_filter}")
+        
         # ========== 第一阶段：快速提取关键财务指标（优先从Excel表格）==========
         logger.info("第一阶段：快速提取关键财务指标（优先从Excel表格）...")
         
         snapshot_dict = {
+            "roe": None,
             "revenue": None,
             "net_profit": None,
-            "operating_cash_flow": None,
-            "asset_liability_ratio": None
+            "total_assets": None,
+            "net_interest_margin": None,
+            "cost_income_ratio": None
         }
         
         import re
         
-        # 优化：先使用RAG检索Excel表格数据，然后使用结构化输出提取
+        # 优化：先使用RAG检索所有文档（PDF和Excel）的表格数据，然后使用结构化输出提取
         try:
-            # 第一步：优先检索Excel表格数据
-            logger.info("🔍 优先检索Excel表格数据...")
+            # 使用HybridRetriever检索（与普通查询相同的方法）
+            logger.info("🔍 使用HybridRetriever检索财务数据（与普通查询相同的方法）...")
             
-            # 构建专门针对Excel表格的查询
-            excel_queries = [
-                "Excel表格 营业收入 净利润 经营现金流 资产负债率 最新年度数值",
-                "利润表 资产负债表 现金流量表 Excel 营业收入 净利润 现金流 负债率",
-                "财务报表表格 Excel 营业收入 净利润 经营现金流 资产负债率"
-            ]
+            # 检查HybridRetriever是否可用
+            use_hybrid = (rag_engine.use_hybrid_retriever and 
+                         rag_engine.hybrid_retriever and 
+                         rag_engine.hybrid_retriever.text_index and 
+                         rag_engine.hybrid_retriever.table_index)
             
-            excel_context = []
-            for query in excel_queries:
-                try:
-                    # 使用RAG检索，然后手动过滤表格数据
-                    retriever = rag_engine.index.as_retriever(similarity_top_k=20)
-                    nodes = retriever.retrieve(query)
+            if use_hybrid:
+                logger.info("✅ 使用HybridRetriever进行混合检索（多指标分别检索）")
+                
+                # 定义6个关键指标及其查询关键词
+                indicators = {
+                    "roe": ["加权平均净资产收益率", "ROE", "净资产收益率"],
+                    "revenue": ["营业收入", "营业总收入", "收入"],
+                    "net_profit": ["净利润", "归属于母公司所有者的净利润", "归属于本行股东的净利润"],
+                    "total_assets": ["资产总额", "总资产", "资产合计"],
+                    "net_interest_margin": ["净息差"],
+                    "cost_income_ratio": ["成本收入比"]
+                }
+                
+                # 为每个指标单独检索，确保都能找到
+                all_hybrid_results = []
+                all_table_results = []
+                found_indicators = set()
+                
+                year_prefix = f"{year}年 " if year else ""
+                company_prefix = f"{company_name} " if company_name else ""
+                
+                for indicator_key, keywords in indicators.items():
+                    # 为每个指标构建查询
+                    query_keywords = " ".join(keywords)
+                    if year and company_name:
+                        query_text = f"{company_prefix}{year_prefix}{query_keywords} {year}年度数值"
+                    elif year:
+                        query_text = f"{year_prefix}{query_keywords} {year}年度数值"
+                    elif company_name:
+                        query_text = f"{company_prefix}{query_keywords} 最新年度数值"
+                    else:
+                        query_text = f"{query_keywords} 最新年度数值"
                     
-                    # 优先选择表格数据和Excel相关数据
-                    table_nodes = []
-                    excel_nodes = []
-                    other_nodes = []
+                    logger.info(f"  🔍 检索指标: {indicator_key} ({keywords[0]})")
+                    indicator_results = rag_engine.hybrid_retriever.retrieve(
+                        query_text,
+                        top_k=30,  # 每个指标检索30个结果
+                        context_filter=context_filter if context_filter else None
+                    )
                     
-                    for node in nodes:
-                        metadata = node.metadata
-                        # 优先选择Excel表格和财务表格
-                        if (metadata.get('document_type') == 'table_data' or 
-                            metadata.get('is_financial', False) or
-                            metadata.get('is_excel_table', False)):
-                            table_nodes.append(node)
-                        elif 'Excel' in node.text or '表格' in node.text or '利润表' in node.text:
-                            excel_nodes.append(node)
+                    if indicator_results:
+                        logger.info(f"    ✅ {indicator_key} 检索到 {len(indicator_results)} 个结果")
+                        all_hybrid_results.extend(indicator_results)
+                        
+                        # 检查是否包含表格数据
+                        for r in indicator_results:
+                            doc = r.get('document')
+                            if not doc:
+                                continue
+                            # 检查metadata
+                            is_table = (
+                                'table' in str(doc.metadata).lower() or 
+                                doc.metadata.get('document_type') == 'table_data' or
+                                doc.metadata.get('is_financial', False)
+                            )
+                            # 检查文本内容
+                            text_preview = str(doc.text)[:500] if hasattr(doc, 'text') else ''
+                            is_table_by_text = (
+                                any(kw in text_preview for kw in keywords) or
+                                '资产负债表' in text_preview or
+                                '利润表' in text_preview or
+                                '|' in text_preview or
+                                ('项 目' in text_preview and (year in text_preview if year else True))
+                            )
+                            if is_table or is_table_by_text:
+                                all_table_results.append(r)
+                                found_indicators.add(indicator_key)
+                    else:
+                        logger.warning(f"    ⚠️ {indicator_key} 未检索到结果")
+                
+                # 去重（基于文档ID或文本内容）
+                seen_docs = set()
+                unique_hybrid_results = []
+                unique_table_results = []
+                
+                for r in all_hybrid_results:
+                    doc = r.get('document')
+                    if not doc:
+                        continue
+                    doc_id = doc.metadata.get('file_path') or doc.metadata.get('filename') or str(doc.text)[:100]
+                    if doc_id not in seen_docs:
+                        seen_docs.add(doc_id)
+                        unique_hybrid_results.append(r)
+                
+                for r in all_table_results:
+                    doc = r.get('document')
+                    if not doc:
+                        continue
+                    doc_id = doc.metadata.get('file_path') or doc.metadata.get('filename') or str(doc.text)[:100]
+                    if doc_id not in seen_docs:
+                        seen_docs.add(doc_id)
+                        unique_table_results.append(r)
+                
+                logger.info(f"✅ 去重后共检索到 {len(unique_hybrid_results)} 个结果，其中 {len(unique_table_results)} 个是表格数据")
+                logger.info(f"✅ 找到的指标: {', '.join(found_indicators) if found_indicators else '无'}")
+                
+                # 优先使用表格数据，如果表格数据不足，补充其他结果
+                if unique_table_results:
+                    logger.info(f"  ✅ 优先使用 {len(unique_table_results)} 个表格数据")
+                    all_context_text = "\n\n".join([r['document'].text for r in unique_table_results[:20]])
+                    
+                    # 检查是否包含所有指标
+                    missing_indicators = []
+                    for indicator_key, keywords in indicators.items():
+                        if not any(kw in all_context_text for kw in keywords):
+                            missing_indicators.append(indicator_key)
+                    
+                    if missing_indicators:
+                        logger.warning(f"  ⚠️ 表格数据中缺少以下指标: {', '.join(missing_indicators)}，补充其他结果")
+                        # 补充非表格结果
+                        non_table_results = [r for r in unique_hybrid_results if r not in unique_table_results]
+                        if non_table_results:
+                            additional_text = "\n\n".join([r['document'].text for r in non_table_results[:15]])
+                            all_context_text = all_context_text + "\n\n" + additional_text
+                    else:
+                        logger.info(f"  ✅ 表格数据中包含所有6个指标")
+                else:
+                    logger.info(f"  ⚠️ 未识别出表格数据，使用所有结果")
+                    all_context_text = "\n\n".join([r['document'].text for r in unique_hybrid_results[:30]])
+                
+                logger.info(f"✅ 构建上下文，长度: {len(all_context_text)}字符")
+                
+                # 最终检查所有指标
+                final_missing = []
+                for indicator_key, keywords in indicators.items():
+                    if not any(kw in all_context_text for kw in keywords):
+                        final_missing.append(indicator_key)
+                
+                if final_missing:
+                    logger.warning(f"  ⚠️ 最终上下文中仍缺少以下指标: {', '.join(final_missing)}")
+                else:
+                    logger.info(f"  ✅ 最终上下文中包含所有6个指标")
+                
+                if not all_context_text:
+                    logger.warning("⚠️ HybridRetriever未找到结果，使用query_engine")
+                    use_hybrid = False
+            
+            if not use_hybrid:
+                # 回退到使用query_engine查询（与普通查询相同）
+                logger.info("🔍 使用query_engine查询财务数据...")
+                
+                # 使用多个查询，每个查询一个指标（这样更准确）
+                # 如果有公司名称和年份，在查询中加入公司名称和年份限制
+                if company_name and year:
+                    queries = [
+                        f"{company_name}{year}年的加权平均净资产收益率（ROE）是多少？请给出{year}年度的加权平均净资产收益率百分比",
+                        f"{company_name}{year}年的营业收入是多少？请给出{year}年度的营业收入数值，包括单位（元、万元或亿元）",
+                        f"{company_name}{year}年的净利润是多少？请给出{year}年度的归属于母公司所有者的净利润数值，包括单位",
+                        f"{company_name}{year}年的资产总额是多少？请给出{year}年度的资产总额数值，包括单位（元、万元或亿元）",
+                        f"{company_name}{year}年的净息差是多少？请给出{year}年度的净息差百分比",
+                        f"{company_name}{year}年的成本收入比是多少？请给出{year}年度的成本收入比百分比"
+                    ]
+                elif company_name:
+                    queries = [
+                        f"{company_name}的加权平均净资产收益率（ROE）是多少？请给出最新年度的加权平均净资产收益率百分比",
+                        f"{company_name}的营业收入是多少？请给出最新年度的营业收入数值，包括单位（元、万元或亿元）",
+                        f"{company_name}的净利润是多少？请给出最新年度的归属于母公司所有者的净利润数值，包括单位",
+                        f"{company_name}的资产总额是多少？请给出最新年度的资产总额数值，包括单位（元、万元或亿元）",
+                        f"{company_name}的净息差是多少？请给出最新年度的净息差百分比",
+                        f"{company_name}的成本收入比是多少？请给出最新年度的成本收入比百分比"
+                    ]
+                elif year:
+                    queries = [
+                        f"{year}年的加权平均净资产收益率（ROE）是多少？请给出{year}年度的加权平均净资产收益率百分比",
+                        f"{year}年的营业收入是多少？请给出{year}年度的营业收入数值，包括单位（元、万元或亿元）",
+                        f"{year}年的净利润是多少？请给出{year}年度的归属于母公司所有者的净利润数值，包括单位",
+                        f"{year}年的资产总额是多少？请给出{year}年度的资产总额数值，包括单位（元、万元或亿元）",
+                        f"{year}年的净息差是多少？请给出{year}年度的净息差百分比",
+                        f"{year}年的成本收入比是多少？请给出{year}年度的成本收入比百分比"
+                    ]
+                else:
+                    queries = [
+                        "加权平均净资产收益率（ROE）是多少？请给出最新年度的加权平均净资产收益率百分比",
+                        "营业收入是多少？请给出最新年度的营业收入数值，包括单位（元、万元或亿元）",
+                        "净利润是多少？请给出最新年度的归属于母公司所有者的净利润数值，包括单位",
+                        "资产总额是多少？请给出最新年度的资产总额数值，包括单位（元、万元或亿元）",
+                        "净息差是多少？请给出最新年度的净息差百分比",
+                        "成本收入比是多少？请给出最新年度的成本收入比百分比"
+                    ]
+                
+                all_context_parts = []
+                for query in queries:
+                    try:
+                        # 如果有context_filter，使用rag_engine.query方法（它会应用过滤）
+                        if context_filter:
+                            result = rag_engine.query(query, context_filter)
+                            response_text = result.get('answer', '')
                         else:
-                            other_nodes.append(node)
+                            response = rag_engine.query_engine.query(query)
+                            response_text = str(response).strip()
+                        
+                        if response_text and len(response_text) > 20:
+                            all_context_parts.append(response_text)
+                            logger.info(f"  ✅ 查询成功: {query[:30]}...")
+                    except Exception as e:
+                        logger.warning(f"查询失败: {query[:30]}... - {str(e)}")
+                
+                # 合并所有查询结果
+                all_context_text = "\n\n".join(all_context_parts) if all_context_parts else ""
+                
+                if not all_context_text:
+                    # 如果还是没数据，使用一个综合查询
+                    logger.info("🔄 使用综合查询...")
+                    try:
+                        if company_name and year:
+                            comprehensive_query = f"请从{company_name}{year}年的文档中提取以下财务指标的具体数值：1.{year}年加权平均净资产收益率（ROE） 2.{year}年营业收入 3.{year}年净利润 4.{year}年资产总额 5.{year}年净息差 6.{year}年成本收入比。请给出{year}年度的数值和单位。"
+                        elif company_name:
+                            comprehensive_query = f"请从{company_name}的文档中提取以下财务指标的具体数值：1.加权平均净资产收益率（ROE） 2.营业收入 3.净利润 4.资产总额 5.净息差 6.成本收入比。请给出最新年度的数值和单位。"
+                        elif year:
+                            comprehensive_query = f"请从{year}年的文档中提取以下财务指标的具体数值：1.{year}年加权平均净资产收益率（ROE） 2.{year}年营业收入 3.{year}年净利润 4.{year}年资产总额 5.{year}年净息差 6.{year}年成本收入比。请给出{year}年度的数值和单位。"
+                        else:
+                            comprehensive_query = "请从所有文档中提取以下财务指标的具体数值：1.加权平均净资产收益率（ROE） 2.营业收入 3.净利润 4.资产总额 5.净息差 6.成本收入比。请给出最新年度的数值和单位。"
+                        
+                        # 如果有context_filter，使用rag_engine.query方法
+                        if context_filter:
+                            result = rag_engine.query(comprehensive_query, context_filter)
+                            all_context_text = result.get('answer', '')
+                        else:
+                            response = rag_engine.query_engine.query(comprehensive_query)
+                            all_context_text = str(response).strip()
+                        logger.info(f"  ✅ 综合查询成功，长度: {len(all_context_text)}字符")
+                    except Exception as e:
+                        logger.warning(f"综合查询也失败: {str(e)}")
+                        all_context_text = ""
+            
+            # 如果上下文太短，尝试直接检索表格数据（包括PDF和Excel）
+            if len(all_context_text) < 500:
+                logger.info("⚠️ 上下文太短，尝试直接检索表格数据（PDF和Excel）...")
+                try:
+                    retriever = rag_engine.index.as_retriever(similarity_top_k=50)
+                    # 构建查询，明确包含资产总额
+                    table_query = f"{year}年 资产负债表 资产总额 总资产 资产合计 加权平均净资产收益率 ROE 营业收入 净利润 净息差 成本收入比 {year}年度数值" if year else "资产负债表 资产总额 总资产 资产合计 加权平均净资产收益率 ROE 营业收入 净利润 净息差 成本收入比 最新年度数值"
+                    nodes = retriever.retrieve(table_query)
                     
-                    # 优先使用表格数据
+                    # 应用公司过滤
+                    if context_filter and 'company' in context_filter:
+                        nodes = rag_engine._filter_nodes(nodes, context_filter)
+                        logger.info(f"  ✅ 应用公司过滤后，剩余 {len(nodes)} 个节点")
+                    
+                    # 手动过滤表格数据（包括PDF和Excel表格）
+                    table_nodes = [n for n in nodes if (
+                        n.metadata.get('document_type') == 'table_data' or 
+                        n.metadata.get('is_financial', False) or
+                        'table' in str(n.metadata).lower() or
+                        '资产负债表' in str(n.text)[:200] or  # 检查文本内容
+                        '资产总额' in str(n.text)[:200] or
+                        '总资产' in str(n.text)[:200]
+                    )]
+                    
                     if table_nodes:
-                        for node in table_nodes[:5]:  # 最多取5个表格
-                            excel_context.append(node.text)
-                            table_id = node.metadata.get('table_id', 'unknown')
-                            logger.info(f"  ✅ 检索到表格数据: {table_id}")
-                    elif excel_nodes:
-                        for node in excel_nodes[:3]:  # 最多取3个Excel相关文档
-                            excel_context.append(node.text)
-                    elif other_nodes:
-                        # 最后才使用普通文档
-                        for node in other_nodes[:2]:
-                            excel_context.append(node.text)
-                    
-                    if excel_context:
-                        break  # 如果找到数据，就不继续查询
+                        table_text = "\n\n".join([node.text for node in table_nodes[:15]])  # 增加数量
+                        if len(table_text) > len(all_context_text):
+                            all_context_text = table_text
+                            logger.info(f"  ✅ 从表格数据获取到 {len(table_text)} 字符的上下文")
+                            # 检查是否包含资产总额
+                            if '资产总额' in table_text or '总资产' in table_text or '资产合计' in table_text:
+                                logger.info(f"  ✅ 表格数据中包含资产总额相关信息")
+                            else:
+                                logger.warning(f"  ⚠️ 表格数据中未找到资产总额相关信息")
+                    else:
+                        logger.warning(f"  ⚠️ 未找到表格数据节点")
                 except Exception as e:
-                    logger.warning(f"检索Excel数据时出错: {str(e)}")
-                    continue
+                    logger.warning(f"检索表格数据失败: {str(e)}")
             
-            # 合并检索到的Excel表格上下文
-            excel_context_text = "\n\n".join(excel_context[:5]) if excel_context else ""
-            
-            if excel_context_text:
-                logger.info(f"✅ 成功检索到Excel表格数据，长度: {len(excel_context_text)}字符")
-            else:
-                logger.warning("⚠️ 未检索到Excel表格数据，将使用全部文档检索")
-            
-            # 构建一次性提取所有指标的提示词（强调Excel表格）
-            extract_prompt = f"""请从以下文档内容中快速提取关键财务指标的具体数值。
+            # 构建一次性提取所有指标的提示词
+            year_emphasis = f"{year}年" if year else "最新年度"
+            extract_prompt = f"""请从以下检索到的文档内容中提取关键财务指标的具体数值。
 
 【重要提示】
-1. 优先从Excel表格数据中提取（如果提供了表格数据）
-2. Excel表格中的数据是最准确的，请优先使用
-3. 如果表格中有多个年度数据，请使用最新年度的数据
+1. 这些内容是从PDF和Excel文件中检索到的，已经包含了最相关的数据
+2. **特别注意：如果内容中包含表格（Markdown格式或文本表格），请仔细从表格中提取数据**
+3. 营业收入可能有多种表述：营业收入、营业总收入、主营业务收入、收入等
+4. **重要：请只提取{year_emphasis}的数据，不要使用其他年度的数据**
+5. 如果文档中有多个年度数据，请优先使用{year_emphasis}的数据
+6. 请仔细查找所有相关数据，特别是表格中的数据
+
+【表格数据示例格式】
+如果看到类似这样的表格：
+| 项 目 | {year_emphasis} | 2023年 | 本年同比增减 |
+|---|---|---|---|
+| 营业收入 | 146,695 | 164,699 | (10.9%) |
+| 加权平均净资产收益率 | 10.08% | 11.38% | -1.30个百分点 |
+
+请从{year_emphasis}列中提取对应的数值。
 
 【需要提取的指标】
-1. 营业收入（最新年度，单位：元或亿元）
-2. 净利润（最新年度，归属于母公司所有者的净利润，单位：元或亿元）
-3. 经营活动产生的现金流量净额（经营现金流，单位：元或亿元）
-4. 资产负债率（总负债/总资产，百分比）
+1. 加权平均净资产收益率（ROE，{year_emphasis}，百分比）
+   - 可能的表述：加权平均净资产收益率、ROE、净资产收益率等
+   - **必须确保是{year_emphasis}的数据，使用年报披露的加权平均净资产收益率**
+   - 示例：10.08% 或 10.08
+2. 营业收入（{year_emphasis}，单位：元、万元或亿元）
+   - 可能的表述：营业收入、营业总收入、主营业务收入、收入总额等
+   - **必须确保是{year_emphasis}的数据**
+   - 示例：146,695（万元）或 146,695万元
+3. 净利润（{year_emphasis}，归属于母公司所有者的净利润，单位：元、万元或亿元）
+   - 可能的表述：净利润、归属于母公司所有者的净利润、归母净利润、归属于本行股东的净利润等
+   - **必须确保是{year_emphasis}的数据**
+   - 示例：44,508（万元）或 44,508万元
+4. 资产总额（{year_emphasis}，单位：元、万元或亿元）
+   - 可能的表述：资产总额、总资产、资产合计等
+   - **必须确保是{year_emphasis}的数据**
+5. 净息差（{year_emphasis}，百分比）
+   - 可能的表述：净息差、净利息收益率等
+   - **必须确保是{year_emphasis}的数据**
+   - 示例：1.87% 或 1.87
+6. 成本收入比（{year_emphasis}，百分比）
+   - 可能的表述：成本收入比、成本收入比率等
+   - **必须确保是{year_emphasis}的数据**
+   - 示例：27.66% 或 27.66
 
 【提取要求】
+- **优先从表格中提取数据**，表格数据最准确
+- 仔细查找文档中的所有数据，不要遗漏
+- **严格只提取{year_emphasis}的数据，忽略其他年度的数据**
 - 只提取数值，不要分析
-- 如果有同比变化率，请一并提取（如"+20%"、"-5%"）
+- 如果有同比变化率，请一并提取（如"+20%"、"-5%"、"下降"、"增长"等）
 - 如果某个指标缺失，is_missing设为true
-- 数值格式：如"100亿元"、"10.5亿元"、"30.5%"
-- 优先从表格中提取，表格数据更准确
+- 数值格式：如"100亿元"、"10.5亿元"、"30.5%"、"146,695万元"、"44,508万元"
+- 必须从提供的文档内容中提取，不要编造数据
 
-【文档内容】
-{excel_context_text if excel_context_text else "请从所有已索引的文档中检索相关数据"}
+【检索到的文档内容】
+{all_context_text if all_context_text else "未检索到相关文档内容"}
 
-请快速返回，只提取数据。"""
+请仔细查找并提取所有能找到的{year_emphasis}财务数据。特别注意表格中的数据！"""
             
-            # 使用结构化输出一次性提取所有指标
-            sllm = llm.as_structured_llm(FinancialSnapshot)
-            extract_response = await sllm.achat([
-                ChatMessage(
-                    role="system",
-                    content="你是一个专业的财务数据提取助手。请快速从文档中准确提取财务指标数值，特别是Excel表格中的数值。Excel表格中的数据是最准确的，请优先使用表格数据。不要生成或猜测数据。只返回数据，不要分析。"
-                ),
-                ChatMessage(role="user", content=extract_prompt)
-            ])
+            # 优化：优先使用正则表达式从表格中直接提取（最可靠）
+            logger.info("🔍 开始提取财务指标（优先使用正则表达式）...")
+            logger.info(f"🔍 上下文文本长度: {len(all_context_text)}字符")
             
-            if hasattr(extract_response, 'raw'):
-                snapshot_data = extract_response.raw
-            else:
-                snapshot_data = extract_response
+            # 第一步：使用正则表达式从表格文本中直接提取
+            import re
+            patterns = {
+                "roe": [
+                    r'加权平均净资产收益率[|\s]+([\d,\.]+%?)',
+                    r'加权平均净资产收益率[：:]\s*([\d,\.]+%?)',
+                    r'ROE[|\s]+([\d,\.]+%?)',
+                    r'ROE[：:]\s*([\d,\.]+%?)',
+                ],
+                "revenue": [
+                    r'营业收入[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                    r'营业收入[：:]\s*([\d,\.]+[万千百十亿]?元?)',
+                    r'营业总收入[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                ],
+                "net_profit": [
+                    r'归属于本行股东的净利润[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                    r'归属于母公司所有者的净利润[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                    r'净利润[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                    r'净利润[：:]\s*([\d,\.]+[万千百十亿]?元?)',
+                ],
+                "total_assets": [
+                    r'资产总额[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                    r'总资产[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                    r'资产合计[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                    r'资产总额[：:]\s*([\d,\.]+[万千百十亿]?元?)',
+                ],
+                "net_interest_margin": [
+                    r'净息差[|\s]+([\d,\.]+%?)',
+                    r'净息差[：:]\s*([\d,\.]+%?)',
+                ],
+                "cost_income_ratio": [
+                    r'成本收入比[|\s]+([\d,\.]+%?)',
+                    r'成本收入比[：:]\s*([\d,\.]+%?)',
+                ]
+            }
             
-            if hasattr(snapshot_data, 'model_dump'):
-                temp_dict = snapshot_data.model_dump()
-            elif isinstance(snapshot_data, dict):
-                temp_dict = snapshot_data
-            else:
-                temp_dict = {}
+            # 从上下文中提取年份列的数据（如果指定了年份）
+            regex_extracted = {}
+            for key, pattern_list in patterns.items():
+                for pattern in pattern_list:
+                    matches = list(re.finditer(pattern, all_context_text, re.IGNORECASE | re.MULTILINE))
+                    if matches:
+                        # 如果有年份，优先选择年份列的数据
+                        best_match = None
+                        if year:
+                            # 查找表格格式：| 指标名 | 2024年 | 2023年 |
+                            # 或者：指标名 | 数值(2024年) | 数值(2023年)
+                            for match in matches:
+                                # 检查匹配位置附近是否有年份
+                                start = max(0, match.start() - 200)
+                                end = min(len(all_context_text), match.end() + 200)
+                                context_around = all_context_text[start:end]
+                                
+                                # 检查是否在年份列中（表格格式）
+                                # 查找年份列的模式：| 2024年 | 数值 | 或 | 2024 | 数值 |
+                                year_in_context = f"{year}年" in context_around or str(year) in context_around
+                                
+                                # 检查是否在正确的年份列（通过查找表格结构）
+                                # 如果匹配值前面有年份，说明是正确的列
+                                match_start = match.start()
+                                before_match = all_context_text[max(0, match_start-50):match_start]
+                                
+                                # 检查表格行：| 指标 | 2024年 | 数值 |
+                                if year_in_context or (str(year) in before_match and '|' in before_match):
+                                    best_match = match
+                                    logger.info(f"  ✅ 找到{year}年的数据: {key}")
+                                    break
+                        
+                        if not best_match:
+                            best_match = matches[0]  # 使用第一个匹配
+                        
+                        value = best_match.group(1).strip()
+                        # 为百分比指标添加%符号
+                        if key in ["roe", "net_interest_margin", "cost_income_ratio"] and not value.endswith('%'):
+                            value = value + '%'
+                        
+                        # 提取同比增减数据（在匹配位置附近查找）
+                        change_rate = None
+                        change_direction = None
+                        match_start = best_match.start()
+                        match_end = best_match.end()
+                        # 在匹配位置后查找同比增减（通常在表格的下一列）
+                        after_match = all_context_text[match_end:match_end+200]
+                        
+                        # 查找同比增减模式（在表格的"本年同比增减"列中）
+                        # 查找表格格式：| 指标 | 2024年 | 2023年 | 同比增减 |
+                        change_patterns = [
+                            r'([\+\-]?\d+\.?\d*%?)',  # 如 +10.9%、-5.2%
+                            r'\(([\+\-]?\d+\.?\d*%?)\)',  # 如 (10.9%)、(-5.2%)
+                            r'([\+\-]?\d+\.?\d*)\s*个百分点',  # 如 -1.30个百分点
+                            r'(增长|下降|持平)',  # 文字描述
+                        ]
+                        
+                        for change_pattern in change_patterns:
+                            change_match = re.search(change_pattern, after_match)
+                            if change_match:
+                                change_text = change_match.group(1).strip()
+                                # 判断是变化率还是方向
+                                if any(c in change_text for c in ['+', '-', '%', '百分点']):
+                                    change_rate = change_text
+                                    # 根据正负号判断方向
+                                    if change_text.startswith('+') or ('%' in change_text and not change_text.startswith('-')):
+                                        change_direction = '增长'
+                                    elif change_text.startswith('-') or ('-' in change_text):
+                                        change_direction = '下降'
+                                    else:
+                                        change_direction = '持平'
+                                elif change_text in ['增长', '下降', '持平']:
+                                    change_direction = change_text
+                                if change_rate or change_direction:
+                                    break
+                        
+                        regex_extracted[key] = {
+                            "name": {
+                                "roe": "加权平均净资产收益率（ROE）",
+                                "revenue": "营业收入",
+                                "net_profit": "净利润",
+                                "total_assets": "资产总额",
+                                "net_interest_margin": "净息差",
+                                "cost_income_ratio": "成本收入比"
+                            }.get(key, key),
+                            "value": value,
+                            "change_rate": change_rate,
+                            "change_direction": change_direction,
+                            "is_missing": False
+                        }
+                        logger.info(f"  ✅ 正则提取到 {key}: {value}" + (f", 同比: {change_rate}" if change_rate else ""))
+                        break
             
             # 更新snapshot_dict
-            for key in ["revenue", "net_profit", "operating_cash_flow", "asset_liability_ratio"]:
-                if key in temp_dict and temp_dict[key] is not None:
-                    if hasattr(temp_dict[key], 'model_dump'):
-                        snapshot_dict[key] = temp_dict[key].model_dump()
-                    elif isinstance(temp_dict[key], dict):
-                        snapshot_dict[key] = temp_dict[key]
+            snapshot_dict.update(regex_extracted)
+            logger.info(f"✅ 正则表达式提取完成，提取到 {len(regex_extracted)} 个指标")
             
-            logger.info(f"✅ 快速提取完成（单次查询）")
+            # 第二步：如果正则提取不完整，使用JSON格式的LLM提取补充
+            missing_keys = [k for k in ["roe", "revenue", "net_profit", "total_assets", "net_interest_margin", "cost_income_ratio"] 
+                          if snapshot_dict.get(k) is None]
+            
+            if missing_keys:
+                logger.info(f"⚠️ 以下指标未通过正则提取，使用JSON格式LLM提取: {missing_keys}")
+                
+                # 使用简化的JSON格式提取
+                json_prompt = f"""请从以下文档内容中提取财务指标，以JSON格式返回。
+
+要求：
+1. 只提取{year_emphasis}的数据
+2. 返回格式必须是有效的JSON，格式如下（必须包含change_rate和change_direction字段）：
+{{
+  "roe": {{"name": "加权平均净资产收益率（ROE）", "value": "10.08%", "change_rate": "-1.30个百分点", "change_direction": "下降", "is_missing": false}},
+  "revenue": {{"name": "营业收入", "value": "146,695万元", "change_rate": "-10.9%", "change_direction": "下降", "is_missing": false}},
+  "net_profit": {{"name": "净利润", "value": "44,508万元", "change_rate": "-4.2%", "change_direction": "下降", "is_missing": false}},
+  "total_assets": {{"name": "资产总额", "value": "5,000,000万元", "change_rate": "+3.7%", "change_direction": "增长", "is_missing": false}},
+  "net_interest_margin": {{"name": "净息差", "value": "1.87%", "change_rate": "-0.51个百分点", "change_direction": "下降", "is_missing": false}},
+  "cost_income_ratio": {{"name": "成本收入比", "value": "27.66%", "change_rate": "-0.24个百分点", "change_direction": "下降", "is_missing": false}}
+}}
+
+3. 如果找不到某个指标，设置 "is_missing": true, "value": null
+4. 如果找不到同比增减数据，change_rate和change_direction可以设为null
+5. 只返回JSON，不要其他文字说明
+6. 优先从表格中提取数据，特别注意"本年同比增减"或"同比增减"列
+
+文档内容：
+{all_context_text[:3000] if len(all_context_text) > 3000 else all_context_text}
+
+请返回JSON格式的数据："""
+                
+                try:
+                    json_response = await llm.acomplete(json_prompt)
+                    json_text = str(json_response).strip()
+                    
+                    # 提取JSON部分
+                    json_match = re.search(r'\{[\s\S]*\}', json_text)
+                    if json_match:
+                        import json
+                        json_data = json.loads(json_match.group(0))
+                        
+                        # 更新缺失的指标
+                        for key in missing_keys:
+                            if key in json_data and json_data[key]:
+                                metric_data = json_data[key]
+                                if isinstance(metric_data, dict) and not metric_data.get('is_missing'):
+                                    snapshot_dict[key] = metric_data
+                                    logger.info(f"  ✅ JSON提取到 {key}: {metric_data.get('value')}")
+                except Exception as e:
+                    logger.warning(f"  ❌ JSON提取失败: {str(e)}")
+            
+            # 第三步：如果还有缺失的指标，进行补充检索
+            still_missing = [k for k in ["roe", "revenue", "net_profit", "total_assets", "net_interest_margin", "cost_income_ratio"] 
+                           if snapshot_dict.get(k) is None]
+            
+            if still_missing and use_hybrid:
+                logger.info(f"⚠️ 以下指标仍未提取到，进行补充检索: {still_missing}")
+                
+                # 为每个缺失的指标单独进行补充检索
+                indicator_keywords = {
+                    "roe": ["加权平均净资产收益率", "ROE"],
+                    "revenue": ["营业收入", "营业总收入"],
+                    "net_profit": ["净利润", "归属于母公司所有者的净利润"],
+                    "total_assets": ["资产总额", "总资产", "资产合计"],
+                    "net_interest_margin": ["净息差"],
+                    "cost_income_ratio": ["成本收入比"]
+                }
+                
+                supplement_contexts = []
+                for missing_key in still_missing:
+                    keywords = indicator_keywords.get(missing_key, [missing_key])
+                    if year and company_name:
+                        supplement_query = f"{company_name} {year}年 {' '.join(keywords)} {year}年度数值"
+                    elif year:
+                        supplement_query = f"{year}年 {' '.join(keywords)} {year}年度数值"
+                    elif company_name:
+                        supplement_query = f"{company_name} {' '.join(keywords)} 最新年度数值"
+                    else:
+                        supplement_query = f"{' '.join(keywords)} 最新年度数值"
+                    
+                    logger.info(f"  🔍 补充检索: {missing_key} ({keywords[0]})")
+                    try:
+                        supplement_results = rag_engine.hybrid_retriever.retrieve(
+                            supplement_query,
+                            top_k=20,
+                            context_filter=context_filter if context_filter else None
+                        )
+                        
+                        if supplement_results:
+                            supplement_text = "\n\n".join([r['document'].text for r in supplement_results[:10]])
+                            supplement_contexts.append(supplement_text)
+                            logger.info(f"    ✅ {missing_key} 补充检索到 {len(supplement_results)} 个结果")
+                        else:
+                            logger.warning(f"    ⚠️ {missing_key} 补充检索未找到结果")
+                    except Exception as e:
+                        logger.warning(f"    ❌ {missing_key} 补充检索失败: {str(e)}")
+                
+                # 将补充的上下文添加到all_context_text
+                if supplement_contexts:
+                    all_context_text = all_context_text + "\n\n" + "\n\n".join(supplement_contexts)
+                    logger.info(f"✅ 补充检索后，上下文长度: {len(all_context_text)}字符")
+                    
+                    # 对补充的上下文再次进行正则提取
+                    for missing_key in still_missing:
+                        keywords = indicator_keywords.get(missing_key, [missing_key])
+                        patterns = {
+                            "roe": [r'加权平均净资产收益率[|\s]+([\d,\.]+%?)', r'ROE[|\s]+([\d,\.]+%?)'],
+                            "revenue": [r'营业收入[|\s]+([\d,\.]+[万千百十亿]?元?)', r'营业总收入[|\s]+([\d,\.]+[万千百十亿]?元?)'],
+                            "net_profit": [r'归属于本行股东的净利润[|\s]+([\d,\.]+[万千百十亿]?元?)', r'归属于母公司所有者的净利润[|\s]+([\d,\.]+[万千百十亿]?元?)', r'净利润[|\s]+([\d,\.]+[万千百十亿]?元?)'],
+                            "total_assets": [r'资产总额[|\s]+([\d,\.]+[万千百十亿]?元?)', r'总资产[|\s]+([\d,\.]+[万千百十亿]?元?)', r'资产合计[|\s]+([\d,\.]+[万千百十亿]?元?)'],
+                            "net_interest_margin": [r'净息差[|\s]+([\d,\.]+%?)'],
+                            "cost_income_ratio": [r'成本收入比[|\s]+([\d,\.]+%?)']
+                        }
+                        
+                        key_patterns = patterns.get(missing_key, [])
+                        for pattern in key_patterns:
+                            matches = list(re.finditer(pattern, all_context_text, re.IGNORECASE | re.MULTILINE))
+                            if matches:
+                                best_match = matches[0]
+                                value = best_match.group(1).strip()
+                                if missing_key in ["roe", "net_interest_margin", "cost_income_ratio"] and not value.endswith('%'):
+                                    value = value + '%'
+                                
+                                snapshot_dict[missing_key] = {
+                                    "name": {
+                                        "roe": "加权平均净资产收益率（ROE）",
+                                        "revenue": "营业收入",
+                                        "net_profit": "净利润",
+                                        "total_assets": "资产总额",
+                                        "net_interest_margin": "净息差",
+                                        "cost_income_ratio": "成本收入比"
+                                    }.get(missing_key, missing_key),
+                                    "value": value,
+                                    "change_rate": None,
+                                    "change_direction": None,
+                                    "is_missing": False
+                                }
+                                logger.info(f"  ✅ 补充检索后正则提取到 {missing_key}: {value}")
+                                break
+            
+            logger.info(f"✅ 提取完成，最终提取到的指标: {[k for k, v in snapshot_dict.items() if v is not None and (not isinstance(v, dict) or not v.get('is_missing'))]}")
             
         except Exception as e:
             logger.warning(f"结构化提取失败: {str(e)}，使用备用方案")
+            import traceback
+            logger.warning(f"详细错误: {traceback.format_exc()}")
             
             # 备用方案：优先从Excel表格查询，然后使用正则提取
             try:
                 logger.info("🔄 使用备用方案：优先检索Excel表格...")
                 
-                # 优先查询Excel表格
-                excel_query = "Excel表格 Excel文件 利润表 资产负债表 现金流量表 营业收入 净利润 经营现金流 资产负债率 最新年度数值"
+                # 优先查询Excel表格，强调年份
+                if year:
+                    excel_query = f"Excel表格 Excel文件 利润表 资产负债表 现金流量表 {year}年 加权平均净资产收益率 ROE 营业收入 净利润 资产总额 净息差 成本收入比 {year}年度数值"
+                else:
+                    excel_query = "Excel表格 Excel文件 利润表 资产负债表 现金流量表 加权平均净资产收益率 ROE 营业收入 净利润 资产总额 净息差 成本收入比 最新年度数值"
                 
-                # 尝试从表格数据中检索
+                # 尝试从表格数据中检索（应用公司过滤）
                 try:
-                    retriever = rag_engine.index.as_retriever(similarity_top_k=15)
+                    retriever = rag_engine.index.as_retriever(similarity_top_k=30)  # 扩大检索范围以便过滤
                     nodes = retriever.retrieve(excel_query)
+                    
+                    # 应用公司过滤
+                    if context_filter and 'company' in context_filter:
+                        nodes = rag_engine._filter_nodes(nodes, context_filter)
+                        logger.info(f"  ✅ 应用公司过滤后，剩余 {len(nodes)} 个节点")
                     
                     # 手动过滤表格数据
                     table_nodes = [n for n in nodes if n.metadata.get('document_type') == 'table_data' or n.metadata.get('is_financial', False)]
                     
                     if table_nodes:
-                        response_text = "\n".join([node.text for node in table_nodes[:3]])
-                        logger.info(f"  ✅ 从Excel表格检索到 {len(table_nodes)} 个表格数据")
+                        response_text = "\n".join([node.text for node in table_nodes[:10]])  # 增加表格数量，确保包含资产负债表
+                        logger.info(f"  ✅ 从Excel表格检索到 {len(table_nodes)} 个表格数据（已应用公司过滤）")
+                        logger.info(f"  📊 表格文本长度: {len(response_text)}字符")
+                        # 检查是否包含资产总额相关关键词
+                        if '资产总额' in response_text or '总资产' in response_text or '资产合计' in response_text:
+                            logger.info(f"  ✅ 表格中包含资产总额相关数据")
+                        else:
+                            logger.warning(f"  ⚠️ 表格中未找到资产总额相关关键词")
                     elif nodes:
                         # 如果没有表格，使用所有检索到的数据
                         response_text = "\n".join([node.text for node in nodes[:3]])
-                        logger.info(f"  ✅ 从文档检索到数据")
+                        logger.info(f"  ✅ 从文档检索到数据（已应用公司过滤）")
                     else:
-                        # 回退到普通查询
-                        response = rag_engine.query_engine.query(excel_query)
-                        response_text = str(response).strip()
+                        # 回退到普通查询（应用公司过滤）
+                        if context_filter:
+                            result = rag_engine.query(excel_query, context_filter)
+                            response_text = result.get('answer', '').strip()
+                        else:
+                            response = rag_engine.query_engine.query(excel_query)
+                            response_text = str(response).strip()
                 except Exception as e:
                     logger.warning(f"表格检索失败: {str(e)}，使用普通查询")
-                    # 如果表格检索失败，使用普通查询
-                    response = rag_engine.query_engine.query(excel_query)
-                    response_text = str(response).strip()
+                    # 如果表格检索失败，使用普通查询（应用公司过滤）
+                    if context_filter:
+                        result = rag_engine.query(excel_query, context_filter)
+                        response_text = result.get('answer', '').strip()
+                    else:
+                        response = rag_engine.query_engine.query(excel_query)
+                        response_text = str(response).strip()
                 
-                # 使用正则表达式快速提取
+                # 使用正则表达式快速提取（增加更多模式，包括表格格式）
                 patterns = {
-                    "revenue": [r'营业收入[：:]\s*([\d,\.]+[万千百十亿]?元?)', r'营收[：:]\s*([\d,\.]+[万千百十亿]?元?)'],
-                    "net_profit": [r'净利润[：:]\s*([\d,\.]+[万千百十亿]?元?)', r'归母净利润[：:]\s*([\d,\.]+[万千百十亿]?元?)'],
-                    "operating_cash_flow": [r'经营.*?现金流[：:]\s*([\d,\.]+[万千百十亿]?元?)', r'经营活动.*?现金流[：:]\s*([\d,\.]+[万千百十亿]?元?)'],
-                    "asset_liability_ratio": [r'资产负债率[：:]\s*([\d,\.]+%?)']
+                    "roe": [
+                        # 表格格式：| 加权平均净资产收益率 | 10.08% | 11.38% |
+                        r'加权平均净资产收益率[|\s]+([\d,\.]+%?)',
+                        r'加权平均净资产收益率[：:]\s*([\d,\.]+%?)',
+                        r'加权平均净资产收益率\s+([\d,\.]+%?)',
+                        r'ROE[|\s]+([\d,\.]+%?)',
+                        r'ROE[：:]\s*([\d,\.]+%?)',
+                        r'ROE\s+([\d,\.]+%?)',
+                        r'净资产收益率[|\s]+([\d,\.]+%?)',
+                        r'净资产收益率[：:]\s*([\d,\.]+%?)',
+                        r'净资产收益率\s+([\d,\.]+%?)',
+                    ],
+                    "revenue": [
+                        # 表格格式：| 营业收入 | 146,695 | 164,699 |
+                        r'营业收入[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                        r'营业收入[：:]\s*([\d,\.]+[万千百十亿]?元?)',
+                        r'营收[：:]\s*([\d,\.]+[万千百十亿]?元?)',
+                        r'营业总收入[：:]\s*([\d,\.]+[万千百十亿]?元?)',
+                        r'主营业务收入[：:]\s*([\d,\.]+[万千百十亿]?元?)',
+                        r'收入[：:]\s*([\d,\.]+[万千百十亿]?元?)',
+                        r'营业收入\s+([\d,\.]+[万千百十亿]?元?)',
+                        r'营业总收入\s+([\d,\.]+[万千百十亿]?元?)',
+                        # 表格格式：营业收入 | 数值
+                        r'营业收入[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                        r'营业总收入[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                    ],
+                    "net_profit": [
+                        # 表格格式：| 归属于本行股东的净利润 | 44,508 | 46,455 |
+                        r'归属于本行股东的净利润[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                        r'归属于母公司所有者的净利润[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                        r'净利润[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                        r'归母净利润[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                        r'净利润[：:]\s*([\d,\.]+[万千百十亿]?元?)',
+                        r'归母净利润[：:]\s*([\d,\.]+[万千百十亿]?元?)',
+                        r'归属于母公司所有者的净利润[：:]\s*([\d,\.]+[万千百十亿]?元?)',
+                        r'净利润\s+([\d,\.]+[万千百十亿]?元?)',
+                        r'归母净利润\s+([\d,\.]+[万千百十亿]?元?)',
+                    ],
+                    "total_assets": [
+                        # 表格格式：| 资产总额 | 5,000,000 | 4,800,000 |
+                        r'资产总额[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                        r'总资产[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                        r'资产合计[|\s]+([\d,\.]+[万千百十亿]?元?)',
+                        r'资产总额[：:]\s*([\d,\.]+[万千百十亿]?元?)',
+                        r'总资产[：:]\s*([\d,\.]+[万千百十亿]?元?)',
+                        r'资产合计[：:]\s*([\d,\.]+[万千百十亿]?元?)',
+                        r'资产总额\s+([\d,\.]+[万千百十亿]?元?)',
+                        r'总资产\s+([\d,\.]+[万千百十亿]?元?)',
+                        r'资产合计\s+([\d,\.]+[万千百十亿]?元?)',
+                    ],
+                    "net_interest_margin": [
+                        # 表格格式：| 净息差 | 1.87% | 2.38% |
+                        r'净息差[|\s]+([\d,\.]+%?)',
+                        r'净息差[：:]\s*([\d,\.]+%?)',
+                        r'净息差\s+([\d,\.]+%?)',
+                        r'净利息收益率[|\s]+([\d,\.]+%?)',
+                        r'净利息收益率[：:]\s*([\d,\.]+%?)',
+                        r'净利息收益率\s+([\d,\.]+%?)',
+                    ],
+                    "cost_income_ratio": [
+                        # 表格格式：| 成本收入比 | 27.66% | 27.90% |
+                        r'成本收入比[|\s]+([\d,\.]+%?)',
+                        r'成本收入比[：:]\s*([\d,\.]+%?)',
+                        r'成本收入比\s+([\d,\.]+%?)',
+                        r'成本收入比率[|\s]+([\d,\.]+%?)',
+                        r'成本收入比率[：:]\s*([\d,\.]+%?)',
+                        r'成本收入比率\s+([\d,\.]+%?)',
+                    ]
                 }
                 
                 for key, pattern_list in patterns.items():
+                    found = False
                     for pattern in pattern_list:
-                        match = re.search(pattern, response_text)
+                        match = re.search(pattern, response_text, re.IGNORECASE | re.MULTILINE)
                         if match:
+                            value = match.group(1).strip()
+                            # 为百分比指标添加%符号（如果没有）
+                            if key in ["roe", "net_interest_margin", "cost_income_ratio"] and not value.endswith('%'):
+                                value = value + '%'
+                            # 为金额类指标添加单位（如果没有）
+                            if key in ["revenue", "net_profit", "total_assets"] and not any(unit in value for unit in ['元', '万元', '亿元', '千元']):
+                                # 如果数值很大（超过1000），可能是万元或亿元
+                                num_value = value.replace(',', '').replace('，', '')
+                                try:
+                                    num = float(num_value)
+                                    if num >= 100000000:
+                                        value = value + '亿元'
+                                    elif num >= 10000:
+                                        value = value + '万元'
+                                    else:
+                                        value = value + '元'
+                                except:
+                                    pass
                             snapshot_dict[key] = {
-                                "name": key,
-                                "value": match.group(1),
+                                "name": {
+                                    "roe": "加权平均净资产收益率（ROE）",
+                                    "revenue": "营业收入",
+                                    "net_profit": "净利润",
+                                    "total_assets": "资产总额",
+                                    "net_interest_margin": "净息差",
+                                    "cost_income_ratio": "成本收入比"
+                                }.get(key, key),
+                                "value": value,
                                 "is_missing": False
                             }
+                            logger.info(f"  ✅ 正则提取到 {key}: {value} (模式: {pattern[:50]}...)")
+                            found = True
                             break
+                    if not found:
+                        logger.warning(f"  ⚠️ 未找到 {key} 的数据")
                 
                 logger.info(f"✅ 备用方案提取完成")
                 
@@ -918,6 +1857,10 @@ async def get_quick_overview():
         
         # 构建简化的指标摘要（不计算比率，加快速度）
         metrics_summary = []
+        if snapshot_dict.get("roe"):
+            roe = snapshot_dict["roe"]
+            if isinstance(roe, dict) and not roe.get("is_missing"):
+                metrics_summary.append(f"ROE: {roe.get('value', 'N/A')}")
         if snapshot_dict.get("revenue"):
             rev = snapshot_dict["revenue"]
             if isinstance(rev, dict) and not rev.get("is_missing"):
@@ -926,36 +1869,42 @@ async def get_quick_overview():
             profit = snapshot_dict["net_profit"]
             if isinstance(profit, dict) and not profit.get("is_missing"):
                 metrics_summary.append(f"净利润: {profit.get('value', 'N/A')}")
-        if snapshot_dict.get("operating_cash_flow"):
-            cash = snapshot_dict["operating_cash_flow"]
-            if isinstance(cash, dict) and not cash.get("is_missing"):
-                metrics_summary.append(f"经营现金流: {cash.get('value', 'N/A')}")
-        if snapshot_dict.get("asset_liability_ratio"):
-            ratio = snapshot_dict["asset_liability_ratio"]
-            if isinstance(ratio, dict) and not ratio.get("is_missing"):
-                metrics_summary.append(f"资产负债率: {ratio.get('value', 'N/A')}")
+        if snapshot_dict.get("total_assets"):
+            assets = snapshot_dict["total_assets"]
+            if isinstance(assets, dict) and not assets.get("is_missing"):
+                metrics_summary.append(f"资产总额: {assets.get('value', 'N/A')}")
+        if snapshot_dict.get("net_interest_margin"):
+            nim = snapshot_dict["net_interest_margin"]
+            if isinstance(nim, dict) and not nim.get("is_missing"):
+                metrics_summary.append(f"净息差: {nim.get('value', 'N/A')}")
+        if snapshot_dict.get("cost_income_ratio"):
+            cir = snapshot_dict["cost_income_ratio"]
+            if isinstance(cir, dict) and not cir.get("is_missing"):
+                metrics_summary.append(f"成本收入比: {cir.get('value', 'N/A')}")
         
         metrics_text = "\n".join(metrics_summary) if metrics_summary else "财务数据不足"
+        year_info = f"{year}年" if year else "最新年度"
         
-        # 构建优化的提示词（强调使用Excel表格数据）
-        verdict_prompt = f"""基于以下财务指标，快速生成一句话核心结论：
+        # 构建优化的提示词（强调使用Excel表格数据和年份）
+        verdict_prompt = f"""基于以下{year_info}财务指标，快速生成一句话核心结论：
 
 {metrics_text}
 
 【重要提示】
 - 这些数据来自Excel表格，是准确的财务数据
+- **这些数据是{year_info}的数据，请基于{year_info}的数值进行分析**
 - 请基于这些具体数值进行分析，不要猜测
 
 要求：
 1. 只输出一句话核心结论，不要详细分析
 2. 必须包含三个维度：
-   - 公司阶段（增长/稳态/下行）- 根据营收和净利润数值判断
-   - 赚钱质量（利润质量/现金质量）- 根据净利润和现金流判断
-   - 风险级别（低/中/高）- 根据负债率判断
+   - 公司阶段（增长/稳态/下行）- 根据{year_info}营收和净利润数值判断
+   - 赚钱质量（利润质量/资产质量）- 根据{year_info}净利润和资产总额判断
+   - 风险级别（低/中/高）- 根据{year_info}财务指标综合判断
 3. 格式：公司处于[阶段]阶段，[赚钱质量描述]，风险级别[级别]
 4. 不超过60字
 5. 如果数据不足，明确说明
-6. 快速判断，基于Excel表格中的具体数值
+6. 快速判断，基于Excel表格中{year_info}的具体数值
 
 示例：公司处于增长阶段，利润质量良好但现金质量一般，风险级别中等。"""
         
@@ -963,10 +1912,19 @@ async def get_quick_overview():
             # 优先从Excel表格检索相关数据来生成结论
             logger.info("🔍 检索Excel表格数据用于生成结论...")
             
-            # 先尝试从表格中检索相关数据
+            # 先尝试从表格中检索相关数据（应用公司过滤）
             try:
-                conclusion_retriever = rag_engine.index.as_retriever(similarity_top_k=12)
-                all_conclusion_nodes = conclusion_retriever.retrieve("财务指标 营业收入 净利润 现金流 负债率 趋势 变化")
+                conclusion_retriever = rag_engine.index.as_retriever(similarity_top_k=30)  # 扩大检索范围以便过滤
+                if year:
+                    conclusion_query = f"{year}年 财务指标 ROE 加权平均净资产收益率 营业收入 净利润 资产总额 净息差 成本收入比 趋势 变化 {year}年度"
+                else:
+                    conclusion_query = "财务指标 ROE 加权平均净资产收益率 营业收入 净利润 资产总额 净息差 成本收入比 趋势 变化"
+                all_conclusion_nodes = conclusion_retriever.retrieve(conclusion_query)
+                
+                # 应用公司过滤
+                if context_filter and 'company' in context_filter:
+                    all_conclusion_nodes = rag_engine._filter_nodes(all_conclusion_nodes, context_filter)
+                    logger.info(f"  ✅ 应用公司过滤后，剩余 {len(all_conclusion_nodes)} 个节点")
                 
                 # 手动过滤表格数据
                 conclusion_nodes = [n for n in all_conclusion_nodes if n.metadata.get('document_type') == 'table_data' or n.metadata.get('is_financial', False)]
@@ -983,9 +1941,13 @@ async def get_quick_overview():
             except Exception as e:
                 logger.warning(f"检索Excel表格数据失败: {str(e)}")
             
-            # 使用query_engine生成结论（它会自动检索相关文档）
-            response_obj = rag_engine.query_engine.query(verdict_prompt)
-            verdict_text = str(response_obj).strip()
+            # 使用rag_engine.query生成结论（它会应用公司过滤）
+            if context_filter:
+                result = rag_engine.query(verdict_prompt, context_filter)
+                verdict_text = result.get('answer', '').strip()
+            else:
+                response_obj = rag_engine.query_engine.query(verdict_prompt)
+                verdict_text = str(response_obj).strip()
             
             # 清理结论文本
             verdict_text = re.sub(r'^(?:核心结论[：:]|核心结论\*\*[：:])\s*\*?\*?', '', verdict_text)
@@ -1047,10 +2009,12 @@ async def get_quick_overview():
         
         # 构建最终返回数据
         overview_data = {
+            "roe": snapshot_dict.get("roe"),
             "revenue": snapshot_dict.get("revenue"),
             "net_profit": snapshot_dict.get("net_profit"),
-            "operating_cash_flow": snapshot_dict.get("operating_cash_flow"),
-            "asset_liability_ratio": snapshot_dict.get("asset_liability_ratio"),
+            "total_assets": snapshot_dict.get("total_assets"),
+            "net_interest_margin": snapshot_dict.get("net_interest_margin"),
+            "cost_income_ratio": snapshot_dict.get("cost_income_ratio"),
             "verdict": verdict_text,
             "stage": stage,
             "profit_quality": profit_quality,
@@ -1058,13 +2022,25 @@ async def get_quick_overview():
             "missing_fields": []
         }
         
+        # 添加调试日志：检查每个指标的状态
+        logger.info(f"🔍 最终返回数据检查:")
+        for key in ["roe", "revenue", "net_profit", "total_assets", "net_interest_margin", "cost_income_ratio"]:
+            value = overview_data.get(key)
+            if value:
+                if isinstance(value, dict):
+                    logger.info(f"  {key}: value={value.get('value')}, is_missing={value.get('is_missing')}")
+                else:
+                    logger.info(f"  {key}: {value}")
+            else:
+                logger.info(f"  {key}: None")
+        
         # 检查缺失字段
         if not overview_data.get("revenue") or (isinstance(overview_data["revenue"], dict) and overview_data["revenue"].get("is_missing")):
             overview_data['missing_fields'].append('营业收入')
         if not overview_data.get("net_profit") or (isinstance(overview_data["net_profit"], dict) and overview_data["net_profit"].get("is_missing")):
             overview_data['missing_fields'].append('净利润')
-        if not overview_data.get("operating_cash_flow") or (isinstance(overview_data["operating_cash_flow"], dict) and overview_data["operating_cash_flow"].get("is_missing")):
-            overview_data['missing_fields'].append('经营现金流')
+        if not overview_data.get("total_assets") or (isinstance(overview_data["total_assets"], dict) and overview_data["total_assets"].get("is_missing")):
+            overview_data['missing_fields'].append('资产总额')
         if not stage:
             overview_data['missing_fields'].append('公司阶段')
         if not profit_quality:
@@ -1088,10 +2064,10 @@ async def get_quick_overview():
         return JSONResponse(status_code=200, content={
             "status": "success",
             "overview": {
+                "roe": None,
                 "revenue": None,
                 "net_profit": None,
-                "operating_cash_flow": None,
-                "asset_liability_ratio": None,
+                "total_assets": None,
                 "verdict": "数据不足，无法生成完整结论。",
                 "stage": None,
                 "profit_quality": None,

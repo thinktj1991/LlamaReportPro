@@ -1,5 +1,5 @@
 <template>
-  <Card title="企业概况" icon="🏢" :status="status" empty-text="暂无企业概况数据">
+  <Card title="财务概况" icon="🏢" :status="status" empty-text="暂无财务概况数据">
     <template #default>
       <div class="company-overview-container">
         <!-- 一句话结论 - 放在最上面 -->
@@ -22,11 +22,22 @@
         
         <!-- 无结论时显示 -->
         <div v-else-if="!overviewData?.verdict" class="no-verdict">
-          <p class="no-verdict-text">暂无企业概况结论</p>
+          <p class="no-verdict-text">暂无财务概况结论</p>
         </div>
         
         <!-- 关键指标卡片 - 只显示有数据的指标 -->
         <div v-if="hasMetrics" class="metrics-cards">
+          <div v-if="hasMetricData(overviewData.roe)" class="metric-card">
+            <div class="metric-header">
+              <span class="metric-icon">📊</span>
+              <span class="metric-name">ROE</span>
+            </div>
+            <div class="metric-value">{{ formatMetricValue(overviewData.roe) }}</div>
+            <div v-if="getMetricChange(overviewData.roe)" :class="['metric-change', getChangeClass(overviewData.roe)]">
+              {{ getMetricChange(overviewData.roe) }}
+            </div>
+          </div>
+          
           <div v-if="hasMetricData(overviewData.revenue)" class="metric-card">
             <div class="metric-header">
               <span class="metric-icon">📈</span>
@@ -49,23 +60,37 @@
             </div>
           </div>
           
-          <div v-if="hasMetricData(overviewData.operating_cash_flow)" class="metric-card">
+          <div v-if="hasMetricData(overviewData.total_assets)" class="metric-card">
             <div class="metric-header">
-              <span class="metric-icon">💵</span>
-              <span class="metric-name">经营现金流</span>
+              <span class="metric-icon">🏦</span>
+              <span class="metric-name">资产总额</span>
             </div>
-            <div class="metric-value">{{ formatMetricValue(overviewData.operating_cash_flow) }}</div>
-            <div v-if="getMetricChange(overviewData.operating_cash_flow)" :class="['metric-change', getChangeClass(overviewData.operating_cash_flow)]">
-              {{ getMetricChange(overviewData.operating_cash_flow) }}
+            <div class="metric-value">{{ formatMetricValue(overviewData.total_assets) }}</div>
+            <div v-if="getMetricChange(overviewData.total_assets)" :class="['metric-change', getChangeClass(overviewData.total_assets)]">
+              {{ getMetricChange(overviewData.total_assets) }}
             </div>
           </div>
           
-          <div v-if="hasMetricData(overviewData.asset_liability_ratio)" class="metric-card">
+          <div v-if="hasMetricData(overviewData.net_interest_margin)" class="metric-card">
             <div class="metric-header">
-              <span class="metric-icon">⚖️</span>
-              <span class="metric-name">资产负债率</span>
+              <span class="metric-icon">📊</span>
+              <span class="metric-name">净息差</span>
             </div>
-            <div class="metric-value">{{ formatMetricValue(overviewData.asset_liability_ratio) }}</div>
+            <div class="metric-value">{{ formatMetricValue(overviewData.net_interest_margin) }}</div>
+            <div v-if="getMetricChange(overviewData.net_interest_margin)" :class="['metric-change', getChangeClass(overviewData.net_interest_margin)]">
+              {{ getMetricChange(overviewData.net_interest_margin) }}
+            </div>
+          </div>
+          
+          <div v-if="hasMetricData(overviewData.cost_income_ratio)" class="metric-card">
+            <div class="metric-header">
+              <span class="metric-icon">💼</span>
+              <span class="metric-name">成本收入比</span>
+            </div>
+            <div class="metric-value">{{ formatMetricValue(overviewData.cost_income_ratio) }}</div>
+            <div v-if="getMetricChange(overviewData.cost_income_ratio)" :class="['metric-change', getChangeClass(overviewData.cost_income_ratio)]">
+              {{ getMetricChange(overviewData.cost_income_ratio) }}
+            </div>
           </div>
         </div>
       </div>
@@ -88,7 +113,9 @@ export default {
   },
   emits: ['generate-report'],
   data() { 
-    return { activeTab: 'basic' }; 
+    return { 
+      activeTab: 'basic'
+    }; 
   },
   computed: {
     status() {
@@ -98,10 +125,12 @@ export default {
     },
     hasMetrics() {
       return this.overviewData && (
+        this.hasMetricData(this.overviewData.roe) ||
         this.hasMetricData(this.overviewData.revenue) || 
         this.hasMetricData(this.overviewData.net_profit) || 
-        this.hasMetricData(this.overviewData.operating_cash_flow) || 
-        this.hasMetricData(this.overviewData.asset_liability_ratio)
+        this.hasMetricData(this.overviewData.total_assets) ||
+        this.hasMetricData(this.overviewData.net_interest_margin) ||
+        this.hasMetricData(this.overviewData.cost_income_ratio)
       );
     }
   },
@@ -566,5 +595,6 @@ export default {
 .metric-change.change-negative {
   color: #dc2626;
 }
+
 </style>
 

@@ -180,7 +180,7 @@ class QueryExpansion:
             '营业收入': ['营业收入', '营收', '收入', 'Revenue', 'Sales'],
             '资产': ['资产', 'Assets', '总资产', '净资产'],
             '负债': ['负债', 'Liabilities', '总负债', '债务'],
-            '现金流': ['现金流', '现金流量', 'Cash Flow', '经营现金流'],
+            '资产总额': ['资产总额', '总资产', '资产合计', 'Total Assets', 'Assets'],
             '毛利率': ['毛利率', 'Gross Margin', '毛利润率'],
             '净利率': ['净利率', 'Net Margin', '净利润率']
         }
@@ -428,7 +428,7 @@ class HybridRetriever:
         """确定检索策略"""
         # 明确的财务指标关键词（应该优先检索表格）
         financial_indicator_keywords = [
-            '营业收入', '营收', '收入', '净利润', '利润', '资产', '负债', '现金流',
+            '营业收入', '营收', '收入', '净利润', '利润', '资产', '负债', '资产总额',
             'ROE', 'ROA', '毛利率', '净利率', '总资产', '净资产', '股东权益',
             '营业成本', '销售费用', '管理费用', '财务费用'
         ]
@@ -669,25 +669,56 @@ class HybridRetriever:
                     # 移除常见的报表类型关键词和年份
                     import re
                     clean_filename = re.sub(r'(利润表|资产负债表|现金流量表|年报|报告|财务报表|财务报告|\d{4}年?)', '', doc_filename, flags=re.IGNORECASE)
+                    clean_filename = re.sub(r'年度\d+', '', clean_filename)  # 移除"年度60"等
                     clean_filename = re.sub(r'[_\-\s\.]+', '', clean_filename)
                     if len(clean_filename) >= 2:
                         filename_company = clean_filename
                 
-                # 检查是否匹配
-                company_found = (
-                    company_lower in doc_text or 
-                    company_lower in doc_company or
-                    (filename_company and company_lower in filename_company) or
-                    (filename_company and filename_company in company_lower)
-                )
+                # 优先使用文件名匹配（最准确）
+                company_found = False
+                
+                # 1. 优先检查文件名匹配（最严格）
+                if filename_company:
+                    # 文件名匹配：公司名应该在文件名中，或者文件名在公司名中
+                    # 使用更严格的匹配：至少匹配前3个字符
+                    if len(company_lower) >= 3 and len(filename_company) >= 3:
+                        # 检查前3个字符是否匹配
+                        if company_lower[:3] == filename_company[:3]:
+                            company_found = True
+                            logger.debug(f"✅ 文件名匹配: 公司名='{company_lower[:3]}', 文件名='{filename_company[:3]}'")
+                        # 或者检查是否包含（双向）
+                        elif company_lower in filename_company or filename_company in company_lower:
+                            company_found = True
+                            logger.debug(f"✅ 文件名包含匹配: 公司名='{company}', 文件名='{filename_company}'")
+                    elif len(company_lower) >= 2 and len(filename_company) >= 2:
+                        # 如果公司名较短，至少匹配前2个字符
+                        if company_lower[:2] == filename_company[:2]:
+                            company_found = True
+                            logger.debug(f"✅ 文件名匹配（短名）: 公司名='{company_lower[:2]}', 文件名='{filename_company[:2]}'")
+                
+                # 2. 如果文件名匹配失败，检查文档文本和元数据
+                if not company_found:
+                    # 检查文档文本中是否包含公司名（要求至少3个字符匹配）
+                    if len(company_lower) >= 3:
+                        # 在文档文本中查找公司名（要求完整匹配，避免误匹配）
+                        # 使用单词边界匹配，避免部分匹配
+                        import re
+                        # 构建匹配模式：公司名前后可以有标点或空格
+                        pattern = re.escape(company_lower)
+                        if re.search(pattern, doc_text):
+                            company_found = True
+                            logger.debug(f"✅ 文档文本匹配: 公司名='{company}'")
+                    
+                    # 检查元数据中的公司名
+                    if not company_found and doc_company:
+                        if company_lower in doc_company or doc_company in company_lower:
+                            company_found = True
+                            logger.debug(f"✅ 元数据匹配: 公司名='{company}', 元数据='{doc_company}'")
                 
                 if not company_found:
-                    # 如果文档中明确包含其他公司名，则排除
-                    # 检查文档中是否包含其他明显的公司名（避免混淆）
-                    common_company_suffixes = ['股份', '有限', '公司', '集团', '银行', '证券', '保险']
-                    # 如果文档中包含其他完整的公司名，则排除
-                    # 这里简化处理：如果文档中没有找到目标公司名，则排除
+                    # 如果文档中没有找到目标公司名，则排除
                     match = False
+                    logger.debug(f"❌ 公司名不匹配: 过滤条件='{company}', 文档文件名='{doc_filename}', 文件名提取='{filename_company}'")
             
             # 年份过滤
             if match and 'year' in context_filter:

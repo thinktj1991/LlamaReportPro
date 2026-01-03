@@ -610,7 +610,7 @@ const App = {
         const result = await response.json()
         if (response.ok && result.status === 'success') {
           companyOverviewData.value = { company_name: result.company_name, year: result.year }
-          showMessage('success', '企业概况生成成功')
+          showMessage('success', '财务概况生成成功')
         } else {
           showMessage('error', result.error || '生成失败')
         }
@@ -669,7 +669,7 @@ const App = {
         const result = await response.json()
         if (response.ok && result.status === 'success') {
           quickOverviewData.value = result.overview
-          showMessage('success', '✅ 企业概况已生成')
+          showMessage('success', '✅ 财务概况已生成')
         } else {
           console.warn('快速概况生成失败:', result)
         }

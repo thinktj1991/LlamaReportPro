@@ -156,7 +156,7 @@ def create_query_engine_tool(query_engine, name: str, description: str) -> Query
 def retrieve_financial_data(
     company_name: Annotated[str, "公司名称"],
     year: Annotated[str, "年份,如'2023'"],
-    metric_type: Annotated[str, "指标类型: revenue(收入), profit(利润), cash_flow(现金流), balance_sheet(资产负债)"],
+    metric_type: Annotated[str, "指标类型: revenue(收入), profit(利润), cash_flow(资产总额), balance_sheet(资产负债)"],
     query_engine: Any
 ) -> str:
     """
@@ -181,7 +181,7 @@ def retrieve_financial_data(
         query_map = {
             "revenue": f"{company_name} {year}年 营业收入 收入增长率 毛利率",
             "profit": f"{company_name} {year}年 净利润 归母净利润 扣非净利润 利润增长率",
-            "cash_flow": f"{company_name} {year}年 经营活动现金流 投资活动现金流 筹资活动现金流",
+            "cash_flow": f"{company_name} {year}年 资产总额 总资产 资产合计",
             "balance_sheet": f"{company_name} {year}年 总资产 总负债 资产负债率 净资产"
         }
         
@@ -388,7 +388,7 @@ async def generate_financial_review(
 - 说明图表反映的财务趋势和特征
 
 ### 2. 业绩速览
-- 提取并分析核心财务指标（收入、利润、现金流、ROE、ROA等）
+- 提取并分析核心财务指标（收入、利润、资产总额、ROE、ROA等）
 - 计算关键财务比率（如毛利率、净利率、资产周转率等）
 - 对比分析同比和环比变化
 - 识别财务表现的主要特征和亮点
@@ -800,7 +800,7 @@ async def generate_business_guidance(
 
 ### 2. 预计的经营业绩描述
 - 详细描述公司对经营业绩的预期
-- 包括收入、利润、现金流等关键指标
+- 包括收入、利润、资产总额等关键指标
 - 说明业绩预期的主要驱动因素
 
 ### 3. 归母净利润范围和增长率范围
