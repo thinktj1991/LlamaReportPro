@@ -27,7 +27,7 @@
         
         <!-- 关键指标卡片 - 只显示有数据的指标 -->
         <div v-if="hasMetrics" class="metrics-cards">
-          <div v-if="hasMetricData(overviewData.roe)" class="metric-card">
+          <div v-if="hasMetricData(overviewData.roe)" class="metric-card clickable" @click="handleMetricClick('ROE', overviewData.roe)">
             <div class="metric-header">
               <span class="metric-icon">📊</span>
               <span class="metric-name">ROE</span>
@@ -36,9 +36,10 @@
             <div v-if="getMetricChange(overviewData.roe)" :class="['metric-change', getChangeClass(overviewData.roe)]">
               {{ getMetricChange(overviewData.roe) }}
             </div>
+            <div class="metric-hint">点击查看可视化</div>
           </div>
           
-          <div v-if="hasMetricData(overviewData.revenue)" class="metric-card">
+          <div v-if="hasMetricData(overviewData.revenue)" class="metric-card clickable" @click="handleMetricClick('营业收入', overviewData.revenue)">
             <div class="metric-header">
               <span class="metric-icon">📈</span>
               <span class="metric-name">营业收入</span>
@@ -47,9 +48,10 @@
             <div v-if="getMetricChange(overviewData.revenue)" :class="['metric-change', getChangeClass(overviewData.revenue)]">
               {{ getMetricChange(overviewData.revenue) }}
             </div>
+            <div class="metric-hint">点击查看可视化</div>
           </div>
           
-          <div v-if="hasMetricData(overviewData.net_profit)" class="metric-card">
+          <div v-if="hasMetricData(overviewData.net_profit)" class="metric-card clickable" @click="handleMetricClick('净利润', overviewData.net_profit)">
             <div class="metric-header">
               <span class="metric-icon">💰</span>
               <span class="metric-name">净利润</span>
@@ -58,9 +60,10 @@
             <div v-if="getMetricChange(overviewData.net_profit)" :class="['metric-change', getChangeClass(overviewData.net_profit)]">
               {{ getMetricChange(overviewData.net_profit) }}
             </div>
+            <div class="metric-hint">点击查看可视化</div>
           </div>
           
-          <div v-if="hasMetricData(overviewData.total_assets)" class="metric-card">
+          <div v-if="hasMetricData(overviewData.total_assets)" class="metric-card clickable" @click="handleMetricClick('资产总额', overviewData.total_assets)">
             <div class="metric-header">
               <span class="metric-icon">🏦</span>
               <span class="metric-name">资产总额</span>
@@ -69,9 +72,10 @@
             <div v-if="getMetricChange(overviewData.total_assets)" :class="['metric-change', getChangeClass(overviewData.total_assets)]">
               {{ getMetricChange(overviewData.total_assets) }}
             </div>
+            <div class="metric-hint">点击查看可视化</div>
           </div>
           
-          <div v-if="hasMetricData(overviewData.net_interest_margin)" class="metric-card">
+          <div v-if="hasMetricData(overviewData.net_interest_margin)" class="metric-card clickable" @click="handleMetricClick('净息差', overviewData.net_interest_margin)">
             <div class="metric-header">
               <span class="metric-icon">📊</span>
               <span class="metric-name">净息差</span>
@@ -80,9 +84,10 @@
             <div v-if="getMetricChange(overviewData.net_interest_margin)" :class="['metric-change', getChangeClass(overviewData.net_interest_margin)]">
               {{ getMetricChange(overviewData.net_interest_margin) }}
             </div>
+            <div class="metric-hint">点击查看可视化</div>
           </div>
           
-          <div v-if="hasMetricData(overviewData.cost_income_ratio)" class="metric-card">
+          <div v-if="hasMetricData(overviewData.cost_income_ratio)" class="metric-card clickable" @click="handleMetricClick('成本收入比', overviewData.cost_income_ratio)">
             <div class="metric-header">
               <span class="metric-icon">💼</span>
               <span class="metric-name">成本收入比</span>
@@ -91,6 +96,7 @@
             <div v-if="getMetricChange(overviewData.cost_income_ratio)" :class="['metric-change', getChangeClass(overviewData.cost_income_ratio)]">
               {{ getMetricChange(overviewData.cost_income_ratio) }}
             </div>
+            <div class="metric-hint">点击查看可视化</div>
           </div>
         </div>
       </div>
@@ -111,7 +117,7 @@ export default {
     loading: { type: Boolean, default: false },
     overviewData: { type: Object, default: null }
   },
-  emits: ['generate-report'],
+  emits: ['generate-report', 'metric-click'],
   data() { 
     return { 
       activeTab: 'basic'
@@ -234,6 +240,13 @@ export default {
       if (direction === '下降') return 'change-negative';
       
       return '';
+    },
+    handleMetricClick(metricName, metricData) {
+      // 触发事件，传递指标名称和数据
+      this.$emit('metric-click', {
+        metricName: metricName,
+        metricData: metricData
+      });
     }
   }
 }
@@ -551,6 +564,18 @@ export default {
   transition: all 0.2s;
 }
 
+.metric-card.clickable {
+  cursor: pointer;
+  position: relative;
+}
+
+.metric-card.clickable:hover {
+  background: #f0f9ff;
+  border-color: #0284c7;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.15);
+  transform: translateY(-2px);
+}
+
 .metric-card:hover {
   background: #f3f4f6;
   border-color: #d1d5db;
@@ -594,6 +619,23 @@ export default {
 
 .metric-change.change-negative {
   color: #dc2626;
+}
+
+.metric-hint {
+  font-size: 0.65rem;
+  color: #6b7280;
+  position: absolute;
+  bottom: 8px;
+  left: 0;
+  right: 0;
+  opacity: 0;
+  transition: opacity 0.2s;
+  text-align: center;
+  pointer-events: none;
+}
+
+.metric-card.clickable:hover .metric-hint {
+  opacity: 1;
 }
 
 </style>

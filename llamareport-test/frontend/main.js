@@ -732,6 +732,79 @@ const App = {
         // 删除杜邦分析卡片：从cards中删除所有杜邦分析类型的卡片，并清空dupontData
         visualizationCards.value = visualizationCards.value.filter(card => card.type !== 'dupont')
         dupontData.value = null
+      },
+      handleMetricClick: async (metricInfo) => {
+        // 处理指标点击事件，生成可视化
+        const { metricName, metricData } = metricInfo
+        const metricValue = typeof metricData === 'object' ? metricData.value : metricData
+        
+        // 构建查询问题
+        let question = ''
+        if (metricName === 'ROE') {
+          question = `请展示${metricName}（加权平均净资产收益率）的可视化图表，当前值为${metricValue}`
+        } else {
+          question = `请展示${metricName}的可视化图表，当前值为${metricValue}`
+        }
+        
+        // 显示加载提示
+        showMessage('loading', `正在生成${metricName}的可视化图表...`)
+        visualizationLoading.value = true
+        
+        try {
+          // 构建context_filter：如果有选中的文件，使用文件名过滤
+          const context_filter = selectedFile.value ? {
+            filename: selectedFile.value.filename
+          } : null
+          
+          const response = await fetch('/query/ask', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              question: question, 
+              enable_visualization: true,
+              context_filter: context_filter
+            })
+          })
+          
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ detail: '请求失败' }))
+            const errorMsg = errorData.detail || errorData.error || `HTTP ${response.status}: ${response.statusText}`
+            showMessage('error', `生成${metricName}可视化失败: ${errorMsg}`)
+            visualizationLoading.value = false
+            return
+          }
+          
+          const result = await response.json()
+          
+          if (result.error) {
+            const errorMsg = result.answer || result.error || '查询失败'
+            showMessage('error', `生成${metricName}可视化失败: ${errorMsg}`)
+            visualizationLoading.value = false
+            return
+          }
+          
+          // 如果成功生成可视化，添加到可视化卡片列表
+          if (result.visualization && result.visualization.has_visualization) {
+            const cardId = Date.now().toString()
+            visualizationCards.value.push({
+              id: cardId,
+              question: `${metricName}可视化`,
+              timestamp: new Date(),
+              data: result.visualization,
+              type: 'chart'
+            })
+            showMessage('success', `✅ ${metricName}可视化图表已生成`)
+            visualizationLoading.value = false
+          } else {
+            showMessage('warning', `⚠️ 未能为${metricName}生成可视化图表`)
+            visualizationLoading.value = false
+          }
+        } catch (error) {
+          console.error('生成指标可视化错误:', error)
+          const errorMsg = error.message || '网络错误或服务器无响应'
+          showMessage('error', `生成${metricName}可视化失败: ${errorMsg}`)
+          visualizationLoading.value = false
+        }
       }
     }
   },
@@ -757,7 +830,7 @@ const App = {
         <main class="app-main">
           <aside class="left-panel">
             <FilePreviewCard ref="filePreviewCard" :files="files" @file-selected="handleFileSelected" @file-uploaded="handleFileUploaded" @file-deleted="handleFileDeleted" @file-process="handleFileProcess" @file-process-multiple="handleFileProcessMultiple" @show-message="showMessage" @files-processed="handleFilesProcessed" />
-            <CompanyOverview :data="companyOverviewData" :loading="companyOverviewLoading" :overview-data="quickOverviewData" @generate-report="handleGenerateReport" />
+            <CompanyOverview :data="companyOverviewData" :loading="companyOverviewLoading" :overview-data="quickOverviewData" @generate-report="handleGenerateReport" @metric-click="handleMetricClick" />
           </aside>
           <section class="middle-panel">
             <ChatArea :messages="chatMessages" :loading="queryLoading" :suggestions="suggestions" @send-message="handleSendMessage" @agent-query="handleAgentQuery" @agent-analysis="goToAgentAnalysis" @dupont-analysis="handleDupontAnalysis" @get-suggestions="handleGetSuggestions" @clear-chat="handleClearChat" @delete-message="handleDeleteMessage" />
