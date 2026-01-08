@@ -130,7 +130,7 @@
             :key="card.id" 
             class="viz-card chart-card"
             :class="{ 'selected': isCardSelected(card.id), 'selectable': selectionMode }"
-            @click="handleCardClick(card.id)"
+            @click="handleCardClick(card.id, $event)"
           >
             <div class="viz-card-header">
               <div class="viz-card-title">
@@ -141,12 +141,30 @@
                 <h3>{{ card.question || '数据可视化' }}</h3>
               </div>
               <div class="viz-card-actions">
-                <button class="viz-card-close" @click.stop="removeCard(card.id)" title="删除">×</button>
+                <button class="viz-card-close" @click.stop="removeCard(card.id, $event)" title="删除">×</button>
               </div>
             </div>
             <div class="viz-card-content">
               <div v-if="card.data && card.data.has_visualization" class="chart-card-content">
-                <div :id="'chart-' + card.id" class="chart-container-inline"></div>
+                <!-- Timeline时间轴（纵向布局，紧凑型） -->
+                <div v-if="card.data.visualization_type === 'timeline' && card.data.timeline_data" 
+                     class="timeline-container">
+                  <div class="custom-timeline">
+                    <div 
+                      v-for="(item, index) in card.data.timeline_data" 
+                      :key="index"
+                      class="timeline-item"
+                      :class="{'timeline-item-left': index % 2 === 0, 'timeline-item-right': index % 2 === 1}">
+                      <div class="timeline-dot" :style="{backgroundColor: getTimelineColor(item.color)}"></div>
+                      <div class="timeline-content">
+                        <div class="timeline-time" v-if="item.time">{{ item.time }}</div>
+                        <div class="timeline-text">{{ item.content }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <!-- Plotly图表 -->
+                <div v-else :id="'chart-' + card.id" class="chart-container-inline"></div>
                 
                 <!-- 综合能力分析文本 -->
                 <div v-if="card.data.analysis_text" class="analysis-text-box">
@@ -156,7 +174,9 @@
                 <!-- 推荐说明 -->
                 <div v-if="card.data.recommendation" class="recommendation-box">
                   <h4>📈 图表推荐</h4>
-                  <p><strong>推荐图表类型:</strong> {{ getChartTypeName(card.data.recommendation.recommended_chart_type) }}</p>
+                  <p><strong>推荐图表类型:</strong> 
+                    <span>{{ getChartTypeName(getActualChartType(card.data)) }}</span>
+                  </p>
                   <p><strong>推荐理由:</strong> {{ card.data.recommendation.reason }}</p>
                 </div>
                 
@@ -346,19 +366,37 @@ export default {
     }
   },
   methods: {
-    removeCard(cardId) {
+    removeCard(cardId, event) {
+      // 阻止事件冒泡，确保不会触发卡片选择
+      if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+      }
+      
+      console.log('🗑️ 删除卡片:', cardId);
+      
+      // 如果卡片在选中列表中，先移除
+      const index = this.selectedCards.indexOf(cardId);
+      if (index > -1) {
+        this.selectedCards.splice(index, 1);
+        console.log('  从选中列表中移除');
+      }
+      
       // 清理Plotly图表实例（如果存在）
       if (window.Plotly) {
         try {
           const chartElement = document.getElementById(`chart-${cardId}`);
           if (chartElement) {
             window.Plotly.purge(chartElement);
+            console.log('  清理图表实例成功');
           }
         } catch (error) {
           console.warn('清理图表失败:', error);
         }
       }
-      // 触发删除事件
+      
+      // 触发删除事件，删除整个卡片
+      console.log('  触发删除事件，删除整个视图卡片');
       this.$emit('remove-card', cardId);
     },
     removeDupontCard() {
@@ -367,11 +405,29 @@ export default {
     },
     isCardInList(chartData) {
       // 检查当前chartData是否已经在cards列表中
-      return this.visualizationCards.some(card => 
-        card.data && card.data.chart_config && 
-        chartData.chart_config &&
-        JSON.stringify(card.data.chart_config) === JSON.stringify(chartData.chart_config)
-      );
+      if (!chartData || !chartData.has_visualization) {
+        return false;
+      }
+      
+      return this.visualizationCards.some(card => {
+        if (!card.data || !card.data.has_visualization) {
+          return false;
+        }
+        
+        // 对于Plotly类型，比较chart_config
+        if (chartData.chart_config && card.data.chart_config) {
+          try {
+            return JSON.stringify(card.data.chart_config) === JSON.stringify(chartData.chart_config);
+          } catch (e) {
+            // 如果JSON比较失败，使用更简单的比较
+            return card.data.chart_config.chart_type === chartData.chart_config.chart_type;
+          }
+        }
+        
+        // 如果都没有配置，比较其他唯一标识符（如query）
+        // 这里可以根据实际需求调整
+        return false;
+      });
     },
     getMetricValue(data, level, metric) {
       if (!data || !data[level] || !data[level][metric]) return '—'
@@ -384,9 +440,19 @@ export default {
       return metricObj.formula || ''
     },
     renderChart(cardId, chartData) {
+      // 如果是Timeline类型，不需要渲染（由Vue模板直接渲染）
+      if (chartData?.visualization_type === 'timeline' && chartData?.timeline_data) {
+        console.log(`🎨 Timeline类型，由Vue模板直接渲染: ${cardId}`);
+        return;
+      }
+      
+      // Plotly图表渲染
       if (!chartData?.chart_config || !window.Plotly) {
         if (!window.Plotly) {
           console.warn('Plotly未加载，无法渲染图表');
+        }
+        if (!chartData?.chart_config) {
+          console.warn(`⚠️ 缺少chart_config，跳过Plotly渲染: ${cardId}`);
         }
         return;
       }
@@ -409,6 +475,12 @@ export default {
           // 处理雷达图
           if (chartConfig.chart_type === 'radar' || (chartConfig.traces && chartConfig.traces[0]?.type === 'scatterpolar')) {
             this.renderRadarChart(chartElementId, chartConfig);
+            return;
+          }
+          
+          // 处理桑基图（Sankey Diagram）
+          if (chartConfig.config && chartConfig.config.sankey_data) {
+            this.renderSankeyChart(chartElementId, chartConfig);
             return;
           }
           
@@ -486,6 +558,76 @@ export default {
         }
       });
     },
+    renderSankeyChart(chartElementId, chartConfig) {
+      try {
+        const sankeyData = chartConfig.config.sankey_data;
+        const nodes = sankeyData.nodes || {};
+        const links = sankeyData.links || {};
+        
+        // 创建Plotly Sankey trace（优化节点大小以适配视图卡片）
+        const trace = {
+          type: 'sankey',
+          node: {
+            pad: 10,  // 进一步减小节点间距（原15改为10）
+            thickness: 18,  // 进一步减小节点厚度（原20改为18）
+            line: { color: 'black', width: 0.5 },
+            label: nodes.label || [],
+            color: nodes.color || [],
+            labelpadding: 3,  // 进一步减小标签内边距
+            labelsuffix: ''  // 移除标签后缀
+          },
+          link: {
+            source: links.source || [],
+            target: links.target || [],
+            value: links.value || [],
+            color: 'rgba(0,0,0,0.15)'
+          }
+        };
+        
+        const layout = {
+          title: {
+            text: chartConfig.layout.title || '桑基图',
+            font: { size: 13, color: '#333' }
+          },
+          height: 280,  // 减小高度以适配视图卡片（与普通图表一致）
+          font: { size: 10 },  // 进一步减小字体大小
+          margin: { t: 45, r: 15, b: 15, l: 15 },  // 减小边距
+          paper_bgcolor: 'rgba(0,0,0,0)',
+          plot_bgcolor: 'rgba(0,0,0,0)',
+          autosize: true  // 自动调整大小
+        };
+        
+        const config = {
+          responsive: true,
+          displayModeBar: true,
+          displaylogo: false,
+          modeBarButtonsToRemove: ['lasso2d', 'select2d']
+        };
+        
+        if (window.Plotly && window.Plotly.newPlot) {
+          try {
+            const existingChart = document.getElementById(chartElementId);
+            if (existingChart && existingChart.data) {
+              window.Plotly.purge(chartElementId);
+            }
+          } catch (e) {
+            // 忽略清理错误
+          }
+          
+          window.Plotly.newPlot(chartElementId, [trace], layout, config);
+          console.log(`✅ 桑基图渲染成功: ${chartElementId}`);
+        } else {
+          console.warn('Plotly未加载，无法渲染桑基图');
+        }
+      } catch (error) {
+        console.error('渲染桑基图失败:', error);
+        const chartDiv = document.getElementById(chartElementId);
+        if (chartDiv) {
+          const errorMsg = error.message || '未知错误';
+          chartDiv.innerHTML = '<div class="error-message"><p>桑基图渲染失败: ' + errorMsg + '</p></div>';
+        }
+      }
+    },
     renderRadarChart(chartElementId, chartConfig) {
       try {
         const trace = chartConfig.traces[0];
@@ -562,6 +704,17 @@ export default {
         }
       }
     },
+    getTimelineColor(color) {
+      const colorMap = {
+        'blue': '#1890ff',
+        'green': '#52c41a',
+        'red': '#ff4d4f',
+        'gray': '#8c8c8c',
+        'orange': '#fa8c16',
+        'purple': '#722ed1'
+      };
+      return colorMap[color] || colorMap['blue'];
+    },
     getInsightIcon(type) {
       const icons = {
         'trend': '📈',
@@ -588,9 +741,29 @@ export default {
         'funnel': '漏斗图',
         'gauge': '仪表盘',
         'table': '表格',
-        'radar': '雷达图'
+        'radar': '雷达图',
+        'timeline': '时间轴',
+        'sankey': '桑基图'
       };
       return names[type] || type;
+    },
+    // 获取实际图表类型（考虑特殊图表类型）
+    getActualChartType(cardData) {
+      // 检查是否是桑基图
+      if (cardData?.chart_config?.config?.sankey_data) {
+        return 'sankey';
+      }
+      // 检查是否是时间轴
+      if (cardData?.visualization_type === 'timeline' || cardData?.timeline_data) {
+        return 'timeline';
+      }
+      // 检查是否是雷达图
+      if (cardData?.chart_config?.chart_type === 'radar' || 
+          (cardData?.chart_config?.traces && cardData.chart_config.traces[0]?.type === 'scatterpolar')) {
+        return 'radar';
+      }
+      // 返回推荐的图表类型
+      return cardData?.recommendation?.recommended_chart_type || 'bar';
     },
     formatAnalysisText(text) {
       if (!text) return '';
@@ -609,7 +782,12 @@ export default {
         this.selectedCards = []
       }
     },
-    handleCardClick(cardId) {
+    handleCardClick(cardId, event) {
+      // 如果点击的是删除按钮，不处理选择逻辑
+      if (event && event.target && (event.target.classList.contains('viz-card-close') || event.target.closest('.viz-card-close'))) {
+        return
+      }
+      
       if (!this.selectionMode) return
       
       const index = this.selectedCards.indexOf(cardId)
@@ -686,8 +864,18 @@ export default {
             if (card.data && card.data.has_visualization && card.type === 'chart') {
               // 延迟渲染，确保DOM元素已创建
               setTimeout(() => {
-                console.log(`🎨 渲染图表卡片: ${card.id} - ${card.question}`);
-                this.renderChart(card.id, card.data);
+                const vizType = card.data.visualization_type || 'plotly';
+                console.log(`🎨 渲染图表卡片: ${card.id} - ${card.question} (类型: ${vizType})`);
+                // 根据可视化类型决定渲染方式
+                if (vizType === 'timeline' && card.data.timeline_data) {
+                  // Timeline类型，由Vue模板直接渲染，不需要手动渲染
+                  console.log(`✅ Timeline类型，由Vue模板渲染: ${card.id}`);
+                } else if (vizType === 'plotly' && card.data.chart_config) {
+                  // Plotly类型，只渲染Plotly
+                  this.renderChart(card.id, card.data);
+                } else {
+                  console.warn(`⚠️ 卡片 ${card.id} 的可视化类型或数据不完整，跳过渲染`);
+                }
               }, 200);
             }
           });
@@ -808,6 +996,155 @@ export default {
   line-height: 1.6;
   color: #0c4a6e;
 }
+
+.timeline-container {
+  width: 100%;
+  padding: 12px 20px;
+  background: #fff;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+/* 纵向时间轴布局（紧凑型） */
+.custom-timeline {
+  position: relative;
+  padding: 10px 0;
+  min-height: 100px;
+}
+
+.custom-timeline::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #e8e8e8;
+  transform: translateX(-50%);
+}
+
+.timeline-item {
+  position: relative;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: flex-start;
+  width: 50%;
+  min-height: 40px;
+}
+
+.timeline-item:last-child {
+  margin-bottom: 0;
+}
+
+.timeline-item-left {
+  left: 0;
+  flex-direction: row;
+  padding-right: 35px;
+  text-align: right;
+}
+
+.timeline-item-right {
+  left: 50%;
+  flex-direction: row-reverse;
+  padding-left: 35px;
+  text-align: left;
+}
+
+.timeline-dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #1890ff;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 2px #e8e8e8;
+  z-index: 2;
+  flex-shrink: 0;
+}
+
+.timeline-item-left .timeline-dot {
+  right: -5px;
+  top: 2px;
+}
+
+.timeline-item-right .timeline-dot {
+  left: -5px;
+  top: 2px;
+}
+
+.timeline-content {
+  flex: 1;
+  min-width: 0;
+  word-wrap: break-word;
+  word-break: break-word;
+}
+
+.timeline-time {
+  font-weight: 600;
+  color: #1890ff;
+  margin-bottom: 4px;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.timeline-item-left .timeline-time {
+  text-align: right;
+}
+
+.timeline-item-right .timeline-time {
+  text-align: left;
+}
+
+.timeline-text {
+  color: #333;
+  line-height: 1.4;
+  font-size: 12px;
+  word-wrap: break-word;
+  word-break: break-word;
+}
+
+.timeline-item-left .timeline-text {
+  text-align: right;
+}
+
+.timeline-item-right .timeline-text {
+  text-align: left;
+}
+
+/* 响应式优化：在小屏幕上调整布局 */
+@media (max-width: 768px) {
+  .timeline-item {
+    width: 100%;
+    margin-bottom: 15px;
+  }
+  
+  .timeline-item-left,
+  .timeline-item-right {
+    left: 0;
+    flex-direction: row;
+    padding-left: 35px;
+    padding-right: 0;
+    text-align: left;
+  }
+  
+  .timeline-item-left .timeline-dot,
+  .timeline-item-right .timeline-dot {
+    left: 15px;
+    right: auto;
+  }
+  
+  .custom-timeline::before {
+    left: 20px;
+  }
+  
+  .timeline-item-left .timeline-time,
+  .timeline-item-right .timeline-time,
+  .timeline-item-left .timeline-text,
+  .timeline-item-right .timeline-text {
+    text-align: left;
+  }
+}
+
 
 .analysis-text-box :deep(strong) {
   color: #0284c7;

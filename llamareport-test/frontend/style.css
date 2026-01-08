@@ -1752,11 +1752,20 @@ body {
     justify-content: center;
     border-radius: 4px;
     transition: all 0.2s ease;
+    position: relative;
+    z-index: 10; /* 确保按钮在最上层，可以正常点击 */
+    pointer-events: auto; /* 确保可以接收点击事件 */
 }
 
 .viz-card-close:hover {
     background: rgba(239, 68, 68, 0.1);
     color: #ef4444;
+}
+
+.viz-card-actions {
+    position: relative;
+    z-index: 10; /* 确保操作区域在最上层 */
+    pointer-events: auto; /* 确保可以接收点击事件 */
 }
 
 .viz-card-content {

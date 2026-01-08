@@ -171,6 +171,18 @@ class VisualizationResponse(BaseModel):
         description="Plotly图表配置"
     )
     
+    # Timeline数据（用于Timeline组件）
+    timeline_data: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="时间轴数据（用于Timeline组件）"
+    )
+    
+    # 可视化类型（plotly或timeline）
+    visualization_type: Optional[str] = Field(
+        default="plotly",
+        description="可视化类型：plotly或timeline"
+    )
+    
     # 简化配置（用于快速生成）
     simple_chart: Optional[Dict[str, Any]] = Field(
         default=None,

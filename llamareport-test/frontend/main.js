@@ -314,8 +314,9 @@ const App = {
               data: result.visualization,
               type: 'chart'
             })
-            // 保持向后兼容
-            visualizationData.value = result.visualization
+            // 注意：不再设置visualizationData，避免重复显示
+            // 因为isCardInList会检查卡片是否已在列表中
+            // visualizationData.value = result.visualization  // 注释掉，避免重复显示
             visualizationLoading.value = false
           }
         } else {
@@ -719,13 +720,24 @@ const App = {
       handleDeleteMessage, goToAgentAnalysis, goBackToMain,
       handleRemoveVizCard: (cardId) => {
         // 删除整个卡片（包括图表、推荐说明、数据洞察等所有内容）
+        console.log('🗑️ 处理删除卡片请求:', cardId);
+        console.log('  删除前卡片数量:', visualizationCards.value.length);
+        
         const index = visualizationCards.value.findIndex(card => card.id === cardId)
         if (index > -1) {
-          visualizationCards.value.splice(index, 1)
+          const removedCard = visualizationCards.value[index];
+          console.log('  找到卡片:', removedCard.question || removedCard.id);
+          visualizationCards.value.splice(index, 1);
+          console.log('  删除后卡片数量:', visualizationCards.value.length);
+          showMessage('success', `✅ 已删除视图卡片: ${removedCard.question || '可视化卡片'}`)
+        } else {
+          console.warn('  未找到要删除的卡片:', cardId);
         }
+        
         // 如果删除的是当前显示的图表，也清空visualizationData
         if (visualizationData.value && visualizationCards.value.length === 0) {
           visualizationData.value = null
+          console.log('  所有卡片已删除，清空visualizationData');
         }
       },
       handleRemoveDupontCard: () => {
