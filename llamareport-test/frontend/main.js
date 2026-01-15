@@ -253,30 +253,33 @@ const App = {
     }
     
     const handleSendMessage = async (question) => {
+      // 统一使用 Agent 查询接口，让 Agent 自动选择工具
+      return await handleAgentQuery(question)
+    }
+    
+    const handleAgentQuery = async (question) => {
       chatMessages.value.push({ type: 'user', content: question, timestamp: new Date() })
       queryLoading.value = true
+      
       try {
-        // 构建context_filter：如果有选中的文件，使用文件名过滤
-        const context_filter = selectedFile.value ? {
-          filename: selectedFile.value.filename
-        } : null
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000) // 10分钟超时
         
-        const response = await fetch('/query/ask', {
+        const response = await fetch('/agent/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            question: question, 
-            enable_visualization: true,
-            context_filter: context_filter
-          })
+          body: JSON.stringify({ question }),
+          signal: controller.signal
         })
+        
+        clearTimeout(timeoutId)
         
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({ detail: '请求失败' }))
-          const errorMsg = errorData.detail || errorData.error || `HTTP ${response.status}: ${response.statusText}`
+          const errorMsg = errorData.detail || errorData.error || `HTTP ${response.status}`
           chatMessages.value.push({ 
             type: 'assistant', 
-            content: `❌ 查询失败: ${errorMsg}\n\n提示：请确保已上传并处理文档，索引已构建完成。`, 
+            content: `❌ Agent查询失败: ${errorMsg}\n\n提示：请确保已上传并处理文档，索引已构建完成。`, 
             timestamp: new Date() 
           })
           showMessage('error', errorMsg)
@@ -285,8 +288,8 @@ const App = {
         
         const result = await response.json()
         
-        if (result.error) {
-          const errorMsg = result.answer || result.error || '查询失败'
+        if (result.status === 'error') {
+          const errorMsg = result.error || result.detail || '查询失败'
           chatMessages.value.push({ 
             type: 'assistant', 
             content: `❌ ${errorMsg}\n\n提示：请确保已上传并处理文档，索引已构建完成。`, 
@@ -296,28 +299,54 @@ const App = {
           return
         }
         
-        if (result.answer) {
-          chatMessages.value.push({ 
-            type: 'assistant', 
-            content: result.answer, 
-            sources: result.sources || [], 
-            timestamp: new Date() 
-          })
-          
-          if (result.visualization && result.visualization.has_visualization) {
-            // 添加新的可视化卡片
-            const cardId = Date.now().toString()
-            visualizationCards.value.push({
-              id: cardId,
-              question: question,
-              timestamp: new Date(),
-              data: result.visualization,
-              type: 'chart'
+        // 处理成功响应
+        if (result.status === 'success') {
+          // 添加文本回答
+          if (result.answer) {
+            chatMessages.value.push({ 
+              type: 'assistant', 
+              content: result.answer, 
+              sources: result.sources || [], 
+              timestamp: new Date() 
             })
-            // 注意：不再设置visualizationData，避免重复显示
-            // 因为isCardInList会检查卡片是否已在列表中
-            // visualizationData.value = result.visualization  // 注释掉，避免重复显示
+          }
+          
+          // 处理可视化
+          if (result.visualization && result.visualization.has_visualization) {
+            if (result.visualization.type === 'financial_tables' && Array.isArray(result.visualization.tables)) {
+              result.visualization.tables
+                .filter(table => table)
+                .forEach((table, idx) => {
+                  visualizationCards.value.push({
+                    id: `${Date.now().toString()}-${idx}`,
+                    question: table.title || '财务表格',
+                    timestamp: new Date(),
+                    data: {
+                      has_visualization: true,
+                      type: 'financial_table',
+                      table
+                    },
+                    type: 'financial_table'
+                  })
+                })
+            } else {
+              const cardId = Date.now().toString()
+              visualizationCards.value.push({
+                id: cardId,
+                question: question,
+                timestamp: new Date(),
+                data: result.visualization,
+                type: 'chart'
+              })
+            }
             visualizationLoading.value = false
+          }
+          
+          // 显示工具调用信息（可选）
+          const toolCallsCount = result.tool_calls?.length || 0
+          if (toolCallsCount > 0) {
+            const toolNames = result.tool_calls.map(tc => tc.tool_name).join('、')
+            showMessage('success', `✅ Agent分析完成，使用了 ${toolCallsCount} 个工具：${toolNames}`)
           }
         } else {
           chatMessages.value.push({ 
@@ -327,11 +356,18 @@ const App = {
           })
         }
       } catch (error) {
-        console.error('查询错误:', error)
-        const errorMsg = error.message || '网络错误或服务器无响应'
+        console.error('Agent查询错误:', error)
+        
+        let errorMsg = '网络错误或请求超时'
+        if (error.name === 'AbortError') {
+          errorMsg = '请求超时（超过10分钟），Agent查询可能需要更长时间，请稍后重试'
+        } else if (error.message) {
+          errorMsg = error.message
+        }
+        
         chatMessages.value.push({ 
           type: 'assistant', 
-          content: `❌ 查询失败: ${errorMsg}\n\n可能的原因：\n1. 网络连接问题\n2. 服务器未响应\n3. 索引未构建完成\n\n请检查网络连接，确保已处理文档。`, 
+          content: `❌ Agent查询失败: ${errorMsg}\n\n可能的原因：\n1. 网络连接问题\n2. 服务器未响应\n3. 索引未构建完成\n\n请检查网络连接，确保已处理文档。`, 
           timestamp: new Date() 
         })
         showMessage('error', errorMsg)
@@ -339,8 +375,141 @@ const App = {
         queryLoading.value = false
       }
     }
+
+    const handleQuickAnalysis = async ({ sectionName, companyName, year, question, typeName }) => {
+      if (!sectionName || !companyName || !year) {
+        showMessage('error', '缺少公司名称或年份，无法生成快捷分析')
+        return
+      }
+      
+      chatMessages.value.push({ type: 'user', content: question, timestamp: new Date() })
+      queryLoading.value = true
+      
+      try {
+        const response = await fetch('/agent/generate-section', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            section_name: sectionName,
+            company_name: companyName,
+            year
+          })
+        })
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ detail: '请求失败' }))
+          const errorMsg = errorData.detail || errorData.error || `HTTP ${response.status}`
+          chatMessages.value.push({
+            type: 'assistant',
+            content: `❌ ${typeName || sectionName}生成失败: ${errorMsg}`,
+            timestamp: new Date()
+          })
+          showMessage('error', errorMsg)
+          return
+        }
+        
+        const result = await response.json()
+        
+        if (result.status === 'error') {
+          const errorMsg = result.error || result.detail || '查询失败'
+          chatMessages.value.push({
+            type: 'assistant',
+            content: `❌ ${typeName || sectionName}生成失败: ${errorMsg}`,
+            timestamp: new Date()
+          })
+          showMessage('error', errorMsg)
+          return
+        }
+        
+        if (result.status === 'success') {
+          let answerText = result.content || ''
+          const visualization = result.visualization
+          
+          if (sectionName === 'financial_review') {
+            const structured = result.structured_response || {}
+            const financialReview = structured.summary
+              ? structured
+              : (structured.financial_review || structured.financialReview || null)
+            const summary = financialReview?.summary
+            const tables = financialReview?.visualization_tables
+            
+            answerText = summary || '未生成财务点评总结'
+            
+            if (tables) {
+              const tableList = [
+                tables.balance_sheet_assets,
+                tables.balance_sheet_liabilities,
+                tables.income_statement_revenue,
+                tables.income_statement_expense,
+                tables.cash_flow
+              ].filter(Boolean)
+              
+              tableList.forEach((table, idx) => {
+                visualizationCards.value.push({
+                  id: `${Date.now().toString()}-${idx}`,
+                  question: table.title || '财务表格',
+                  timestamp: new Date(),
+                  data: {
+                    has_visualization: true,
+                    type: 'financial_table',
+                    table
+                  },
+                  type: 'financial_table'
+                })
+              })
+            }
+          }
+          
+          if (visualization && visualization.type === 'financial_tables' && Array.isArray(visualization.tables)) {
+            visualization.tables
+              .filter(table => table)
+              .forEach((table, idx) => {
+                visualizationCards.value.push({
+                  id: `${Date.now().toString()}-${idx}`,
+                  question: table.title || '财务表格',
+                  timestamp: new Date(),
+                  data: {
+                    has_visualization: true,
+                    type: 'financial_table',
+                    table
+                  },
+                  type: 'financial_table'
+                })
+              })
+          } else if (visualization && visualization.has_visualization) {
+            visualizationCards.value.push({
+              id: Date.now().toString(),
+              question: question,
+              timestamp: new Date(),
+              data: visualization,
+              type: 'chart'
+            })
+          }
+          
+          if (answerText) {
+            chatMessages.value.push({
+              type: 'assistant',
+              content: answerText,
+              timestamp: new Date()
+            })
+          }
+        }
+      } catch (error) {
+        const errorMsg = error.message || '网络错误或请求超时'
+        chatMessages.value.push({
+          type: 'assistant',
+          content: `❌ ${typeName || sectionName}生成失败: ${errorMsg}`,
+          timestamp: new Date()
+        })
+        showMessage('error', errorMsg)
+      } finally {
+        queryLoading.value = false
+      }
+    }
     
-    const handleAgentQuery = async (question) => {
+    // handleAgentQuery 已经在上面定义，用于普通查询
+    // 这个函数保留用于跳转到Agent分析页面的场景（如果需要）
+    const handleAgentQueryPage = async (question) => {
       // 切换到Agent分析页面
       currentPage.value = 'agent-analysis'
       
@@ -916,7 +1085,7 @@ const App = {
             <CompanyOverview :data="companyOverviewData" :loading="companyOverviewLoading" :overview-data="quickOverviewData" @generate-report="handleGenerateReport" @metric-click="handleMetricClick" />
           </aside>
           <section class="middle-panel">
-            <ChatArea :messages="chatMessages" :loading="queryLoading" :suggestions="suggestions" @send-message="handleSendMessage" @agent-query="handleAgentQuery" @agent-analysis="goToAgentAnalysis" @dupont-analysis="handleDupontAnalysis" @get-suggestions="handleGetSuggestions" @clear-chat="handleClearChat" @delete-message="handleDeleteMessage" />
+            <ChatArea :messages="chatMessages" :loading="queryLoading" :suggestions="suggestions" :selected-file="selectedFile" :dupont-data="dupontData" @send-message="handleSendMessage" @agent-query="handleAgentQuery" @quick-analysis="handleQuickAnalysis" @agent-analysis="goToAgentAnalysis" @dupont-analysis="handleDupontAnalysis" @get-suggestions="handleGetSuggestions" @clear-chat="handleClearChat" @delete-message="handleDeleteMessage" />
           </section>
           <aside class="right-panel">
             <VisualizationPanel :chart-data="visualizationData" :dupont-data="dupontData" :visualization-cards="visualizationCards" :loading="visualizationLoading || dupontLoading" @remove-card="handleRemoveVizCard" @remove-dupont-card="handleRemoveDupontCard" @generate-comprehensive-analysis="handleGenerateComprehensiveAnalysis" />

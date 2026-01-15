@@ -140,17 +140,35 @@
                 <button class="viz-close-btn" @click="removeVisualization(idx)" title="删除">×</button>
               </div>
               <div class="viz-card-content">
-                <div :id="'agent-viz-' + (viz.id || idx)" class="chart-container"></div>
+                <div v-if="viz.data?.type === 'financial_table' && viz.data?.table" class="table-container">
+                  <table class="financial-table">
+                    <thead>
+                      <tr>
+                        <th v-for="(header, hIdx) in viz.data.table.headers" :key="hIdx">
+                          {{ header }}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(row, rIdx) in viz.data.table.rows" :key="rIdx">
+                        <td v-for="(cell, cIdx) in row" :key="cIdx">
+                          {{ cell }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div v-else :id="'agent-viz-' + (viz.id || idx)" class="chart-container"></div>
                 
                 <!-- 推荐说明 -->
-                <div v-if="viz.data?.recommendation" class="recommendation-box">
+                <div v-if="viz.data?.recommendation && viz.data?.type !== 'financial_table'" class="recommendation-box">
                   <h5>📈 图表推荐</h5>
                   <p><strong>类型:</strong> {{ getChartTypeName(viz.data.recommendation.recommended_chart_type) }}</p>
                   <p><strong>理由:</strong> {{ viz.data.recommendation.reason }}</p>
                 </div>
                 
                 <!-- 数据洞察 -->
-                <div v-if="viz.data?.insights && viz.data.insights.length > 0" class="insights-box">
+                <div v-if="viz.data?.insights && viz.data.insights.length > 0 && viz.data?.type !== 'financial_table'" class="insights-box">
                   <h5>💡 数据洞察</h5>
                   <div 
                     v-for="(insight, i) in viz.data.insights" 
@@ -378,11 +396,27 @@ export default {
           // 处理可视化
           if (result.visualization && result.visualization.has_visualization) {
             console.log('📊 [AgentAnalysisPage] 添加可视化数据')
-            this.visualizations.push({
-              id: Date.now().toString(),
-              question: question,
-              data: result.visualization
-            })
+            if (result.visualization.type === 'financial_tables' && Array.isArray(result.visualization.tables)) {
+              result.visualization.tables
+                .filter(table => table)
+                .forEach((table, idx) => {
+                  this.visualizations.push({
+                    id: `${Date.now().toString()}-${idx}`,
+                    question: table.title || '财务表格',
+                    data: {
+                      has_visualization: true,
+                      type: 'financial_table',
+                      table
+                    }
+                  })
+                })
+            } else {
+              this.visualizations.push({
+                id: Date.now().toString(),
+                question: question,
+                data: result.visualization
+              })
+            }
           }
           
           // 处理工具调用结果 - 优先处理
@@ -654,7 +688,7 @@ export default {
     },
     renderAllCharts() {
       this.visualizations.forEach((viz, idx) => {
-        if (viz.data && viz.data.has_visualization) {
+        if (viz.data && viz.data.has_visualization && viz.data.type !== 'financial_table') {
           setTimeout(() => {
             this.renderChart(viz.id || idx, viz.data)
           }, 100 * (idx + 1))

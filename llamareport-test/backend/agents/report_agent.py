@@ -257,10 +257,8 @@ class ReportAgent:
 
 ## 报告结构（标准五部分）
 一、**财务点评** (使用 generate_financial_review 工具)
-   - 财务图表描述：识别并描述主要财务图表
-   - 业绩速览：详细分析核心财务指标
-   - 业绩对比：与预期、同行业、历史数据对比
-   - 指标归因：深入分析各指标变动原因
+   - 财务点评总结：覆盖资产、负债、利润、现金流关键变化
+   - 可视化表格：资产结构表、负债结构表、营业收入结构表、营业支出结构表、现金流量明细
 
 二、**业绩指引** (使用 generate_business_guidance 工具)
    - 业绩预告期间和预期
@@ -461,15 +459,18 @@ class ReportAgent:
             section_chinese = section_map.get(section_name, section_name)
             query = f"请生成{company_name} {year}年的{section_chinese}章节。"
             
-            response = await self.agent.run(query)
+            # 使用query管线，确保可视化与精简输出一致
+            result = await self.query(query)
             
             logger.info(f"✅ 章节生成成功: {section_name}")
             
             return {
                 "status": "success",
                 "section_name": section_name,
-                "content": str(response),
-                "structured_response": response.structured_response if hasattr(response, 'structured_response') else None
+                "content": result.get("answer", ""),
+                "structured_response": result.get("structured_response"),
+                "visualization": result.get("visualization"),
+                "tool_calls": result.get("tool_calls", [])
             }
             
         except Exception as e:
@@ -510,6 +511,8 @@ class ReportAgent:
             # 收集工具调用结果
             visualization_data = None
             tool_results = []
+            financial_summary_override = None
+            summary_override = None
 
             # 流式处理事件以捕获工具调用结果 - 添加性能监控
             import time
@@ -576,6 +579,145 @@ class ReportAgent:
                                 logger.info(f"🔍 [Agent Query] 工具 {tool_name} 输出字符串长度: {len(tool_output_serializable)}")
                                 if len(tool_output_serializable) > 0:
                                     logger.info(f"🔍 [Agent Query] 工具 {tool_name} 输出字符串（前200字符）: {tool_output_serializable[:200]}")
+
+                            # 如果是财务点评工具，提取可视化表格并精简输出
+                            if tool_name == "generate_financial_review" and isinstance(tool_output_serializable, dict):
+                                raw_output = tool_output_serializable.get("raw_output", tool_output_serializable)
+                                if isinstance(raw_output, str):
+                                    try:
+                                        import json
+                                        raw_output = json.loads(raw_output)
+                                    except Exception:
+                                        raw_output = {}
+                                if isinstance(raw_output, dict):
+                                    summary = raw_output.get("summary")
+                                    tables = raw_output.get("visualization_tables")
+                                else:
+                                    summary = None
+                                    tables = None
+                                if tables:
+                                    visualization_data = {
+                                        "has_visualization": True,
+                                        "type": "financial_tables",
+                                        "visualization_type": "table",
+                                        "tables": [
+                                            tables.get("balance_sheet_assets") if isinstance(tables, dict) else None,
+                                            tables.get("balance_sheet_liabilities") if isinstance(tables, dict) else None,
+                                            tables.get("income_statement_revenue") if isinstance(tables, dict) else None,
+                                            tables.get("income_statement_expense") if isinstance(tables, dict) else None,
+                                            tables.get("cash_flow") if isinstance(tables, dict) else None
+                                        ]
+                                    }
+                                if summary:
+                                    financial_summary_override = summary
+                                    summary_override = summary
+                                    tool_output_serializable = {"summary": summary}
+                            elif tool_name in {
+                                "generate_business_guidance",
+                                "generate_business_highlights",
+                                "generate_profit_forecast_and_valuation",
+                                "generate_dupont_analysis"
+                            } and isinstance(tool_output_serializable, dict):
+                                raw_output = tool_output_serializable.get("raw_output", tool_output_serializable)
+                                if isinstance(raw_output, str):
+                                    try:
+                                        import json
+                                        raw_output = json.loads(raw_output)
+                                    except Exception:
+                                        raw_output = {}
+                                if hasattr(raw_output, "model_dump"):
+                                    try:
+                                        raw_output = raw_output.model_dump()
+                                    except Exception:
+                                        raw_output = {}
+                                if not isinstance(raw_output, dict):
+                                    raw_output = {}
+                                summary_text = None
+                                if tool_name == "generate_business_guidance":
+                                    guidance_period = raw_output.get("guidance_period")
+                                    expected_performance = raw_output.get("expected_performance")
+                                    parent_profit = raw_output.get("parent_net_profit_range")
+                                    revenue_range = raw_output.get("revenue_range")
+                                    business_guidance = raw_output.get("business_specific_guidance") or []
+                                    risk_warnings = raw_output.get("risk_warnings") or []
+                                    parts = []
+                                    if guidance_period:
+                                        parts.append(f"{guidance_period}业绩指引")
+                                    if expected_performance:
+                                        parts.append(expected_performance)
+                                    if parent_profit or revenue_range:
+                                        metrics = []
+                                        if parent_profit:
+                                            metrics.append(f"归母净利润：{parent_profit}")
+                                        if revenue_range:
+                                            metrics.append(f"营业收入：{revenue_range}")
+                                        parts.append("关键指标：" + "，".join(metrics))
+                                    if business_guidance:
+                                        parts.append("业务指引：" + "；".join(business_guidance[:3]))
+                                    if risk_warnings:
+                                        parts.append("风险提示：" + "；".join(risk_warnings[:3]))
+                                    summary_text = "。".join([p for p in parts if p])
+                                elif tool_name == "generate_business_highlights":
+                                    overall_summary = raw_output.get("overall_summary")
+                                    if overall_summary:
+                                        summary_text = overall_summary
+                                    else:
+                                        highlights = raw_output.get("highlights") or []
+                                        snippet_list = []
+                                        for item in highlights[:3]:
+                                            if isinstance(item, dict):
+                                                business_type = item.get("business_type", "业务板块")
+                                                highlights_text = item.get("highlights", "")
+                                                if highlights_text:
+                                                    snippet_list.append(f"{business_type}：{highlights_text}")
+                                        if snippet_list:
+                                            summary_text = "；".join(snippet_list)
+                                elif tool_name == "generate_profit_forecast_and_valuation":
+                                    consensus = raw_output.get("consensus_forecast") or {}
+                                    valuation = raw_output.get("valuation_analysis") or {}
+                                    market_rating = consensus.get("market_rating")
+                                    target_price = consensus.get("target_price")
+                                    upside = consensus.get("upside_potential")
+                                    valuation_method = valuation.get("valuation_method")
+                                    current_valuation = valuation.get("current_valuation")
+                                    parts = []
+                                    if market_rating:
+                                        parts.append(f"市场评级：{market_rating}")
+                                    if target_price:
+                                        parts.append(f"一致目标价：{target_price}")
+                                    if upside:
+                                        parts.append(f"上涨空间：{upside}")
+                                    if valuation_method or current_valuation:
+                                        metrics = []
+                                        if valuation_method:
+                                            metrics.append(f"估值方法：{valuation_method}")
+                                        if current_valuation:
+                                            metrics.append(f"当前估值：{current_valuation}")
+                                        parts.append("估值信息：" + "，".join(metrics))
+                                    summary_text = "；".join([p for p in parts if p])
+                                elif tool_name == "generate_dupont_analysis":
+                                    level1 = raw_output.get("level1") or {}
+                                    roe = None
+                                    roa = None
+                                    equity_multiplier = None
+                                    if isinstance(level1, dict):
+                                        roe = (level1.get("roe") or {}).get("formatted_value") if isinstance(level1.get("roe"), dict) else None
+                                        roa = (level1.get("roa") or {}).get("formatted_value") if isinstance(level1.get("roa"), dict) else None
+                                        equity_multiplier = (level1.get("equity_multiplier") or {}).get("formatted_value") if isinstance(level1.get("equity_multiplier"), dict) else None
+                                    parts = []
+                                    if roe:
+                                        parts.append(f"ROE：{roe}")
+                                    if roa:
+                                        parts.append(f"ROA：{roa}")
+                                    if equity_multiplier:
+                                        parts.append(f"权益乘数：{equity_multiplier}")
+                                    insights = raw_output.get("insights") or []
+                                    if insights:
+                                        parts.append("洞察：" + "；".join(insights[:2]))
+                                    summary_text = "；".join([p for p in parts if p])
+                                if summary_text:
+                                    summary_override = summary_text
+                                    tool_output_serializable = {"summary": summary_text}
 
                             # 确保工具输出是可序列化的字典格式
                             tool_result = {
@@ -692,6 +834,9 @@ class ReportAgent:
             except Exception as extract_error:
                 logger.warning(f"[Agent Query] 提取回答内容时出错: {str(extract_error)}，使用默认处理")
                 answer_text = str(response) if response else ""
+
+            if summary_override:
+                answer_text = summary_override
             
             # 如果没有回答内容，但有工具调用结果，生成一个总结
             if not answer_text or answer_text.strip() == "":

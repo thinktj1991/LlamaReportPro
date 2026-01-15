@@ -594,19 +594,29 @@ async def generate_dupont_analysis_api(request: DupontAnalysisRequest):
             if not company_name or not year:
                 try:
                     # 从索引中检索该文件的文档
-                    retriever = rag_engine.index.as_retriever(similarity_top_k=10)
-                    nodes = retriever.retrieve("公司名称 年份 报告")
+                    retriever = rag_engine.index.as_retriever(similarity_top_k=20)  # 增加检索数量
                     
-                    # 过滤出匹配的文件（检查filename和source_file）
-                    matching_nodes = [
-                        node for node in nodes 
-                        if (not filename) or (node.metadata.get('filename') == filename or 
-                           node.metadata.get('source_file') == filename)
-                    ]
+                    # 如果指定了文件，先尝试从该文件提取；如果没有，从所有文件提取
+                    if filename:
+                        # 先尝试从指定文件提取
+                        nodes = retriever.retrieve("公司名称 年份 报告年度")
+                        matching_nodes = [
+                            node for node in nodes 
+                            if node.metadata.get('filename') == filename or 
+                               node.metadata.get('source_file') == filename
+                        ]
+                        # 如果指定文件没有找到，尝试从所有文件提取（可能是其他相关文件）
+                        if not matching_nodes:
+                            logger.info(f"指定文件 {filename} 中未找到公司信息，尝试从所有文件提取...")
+                            matching_nodes = nodes[:10]  # 使用前10个节点
+                    else:
+                        # 从所有文件提取
+                        nodes = retriever.retrieve("公司名称 年份 报告年度")
+                        matching_nodes = nodes[:10]
                     
                     if matching_nodes:
                         # 合并所有匹配节点的文本
-                        all_text = "\n".join([node.text for node in matching_nodes[:5]])
+                        all_text = "\n".join([node.text for node in matching_nodes[:10]])  # 增加文本量
                         
                         if not company_name:
                             # 从文本中提取公司名称（多种模式）
@@ -626,20 +636,25 @@ async def generate_dupont_analysis_api(request: DupontAnalysisRequest):
                                         break
                         
                         if not year:
-                            # 从文本中提取年份
+                            # 从文本中提取年份（更全面的模式）
                             year_patterns = [
-                                r'(\d{4})年',
                                 r'报告年度[：:]\s*(\d{4})',
                                 r'(\d{4})年度',
+                                r'(\d{4})年[度]?报告',
+                                r'(\d{4})年[度]?',
+                                r'截至(\d{4})年',
                             ]
                             for pattern in year_patterns:
-                                year_match = re.search(pattern, all_text)
-                                if year_match:
-                                    candidate_year = year_match.group(1)
+                                year_matches = re.findall(pattern, all_text)
+                                if year_matches:
+                                    # 选择最常见的年份（通常是报告年份）
+                                    from collections import Counter
+                                    year_counts = Counter(year_matches)
+                                    candidate_year = year_counts.most_common(1)[0][0]
                                     # 验证年份合理性
                                     if 2000 <= int(candidate_year) <= 2030:
                                         year = candidate_year
-                                        logger.info(f"从文档内容提取年份: {year}")
+                                        logger.info(f"从文档内容提取年份: {year} (出现 {year_counts[candidate_year]} 次)")
                                         break
                         
                         logger.info(f"从文档内容提取: {company_name or '未找到'} - {year or '未找到'}")
@@ -718,58 +733,20 @@ async def generate_dupont_analysis_api(request: DupontAnalysisRequest):
         
         logger.info(f"开始生成杜邦分析: {company_name} - {year}")
         
-        # 如果有context_filter，需要创建一个带过滤器的query_engine
-        # 由于generate_dupont_analysis需要query_engine，我们在这里传递context_filter信息
-        # 注意：需要在dupont_tools中支持context_filter，或者在这里先提取数据
-        
-        # 如果指定了文件，先尝试从该文件提取财务数据
-        financial_data = None
-        if filename:
-            try:
-                logger.info(f"从文件 {filename} 中提取财务数据...")
-                # 使用retriever从指定文件提取数据
-                retriever = rag_engine.index.as_retriever(similarity_top_k=20)
-                nodes = retriever.retrieve(f"{company_name} {year}年 净利润 营业收入 总资产 股东权益")
-                
-                # 过滤出匹配的文件（检查filename和source_file）
-                matching_nodes = [
-                    node for node in nodes 
-                    if node.metadata.get('filename') == filename or 
-                       node.metadata.get('source_file') == filename
-                ]
-                
-                if matching_nodes:
-                    # 构建查询文本
-                    context_text = "\n".join([node.text for node in matching_nodes[:5]])
-                    # 使用query_engine查询，但限制在匹配的节点中
-                    extract_query = f"""
-                    请从以下内容中提取财务数据：
-                    {context_text}
-                    
-                    请提取以下指标的数值（单位：元）：
-                    1. 净利润（归属于母公司所有者的净利润）
-                    2. 营业收入（营业总收入）
-                    3. 总资产
-                    4. 股东权益（归属于母公司所有者权益）
-                    5. 流动资产
-                    6. 非流动资产
-                    
-                    请以JSON格式返回，键名使用中文。
-                    """
-                    response = query_engine.query(extract_query)
-                    from agents.dupont_tools import parse_financial_data_response_enhanced, validate_and_complement_financial_data
-                    financial_data = parse_financial_data_response_enhanced(str(response), context_text)
-                    financial_data = validate_and_complement_financial_data(financial_data, context_text)
-                    logger.info(f"从文件 {filename} 提取到 {len(financial_data)} 个指标")
-            except Exception as e:
-                logger.warning(f"从文件提取财务数据失败: {str(e)}，将使用默认提取方法")
+        # 注意：不再在这里预先提取数据，让 generate_dupont_analysis 内部的 extract_financial_data_for_dupont 
+        # 使用结构化LLM输出方法提取数据，这样更准确（和 quick-overview 使用相同的方法）
+        # 如果指定了文件，传递给 generate_dupont_analysis，让它内部限制查询范围
         
         # 调用杜邦分析函数（现在是async）
+        # generate_dupont_analysis 内部会调用 extract_financial_data_for_dupont
+        # 该方法使用结构化LLM输出（as_structured_llm），比正则表达式提取更准确
+        # 和 quick-overview 使用相同的数据提取方法
         dupont_result = await generate_dupont_analysis(
             company_name=company_name,
             year=year,
             query_engine=query_engine,
-            financial_data=financial_data  # 如果已提取，直接传递
+            financial_data=None,  # 让函数内部使用结构化LLM方法提取，更准确
+            filename=filename  # 传递文件名，用于限制查询范围
         )
         
         logger.info(f"✅ 杜邦分析生成成功")
@@ -778,6 +755,7 @@ async def generate_dupont_analysis_api(request: DupontAnalysisRequest):
         def convert_decimal_to_float(obj):
             """递归地将Decimal转换为float"""
             from decimal import Decimal
+            from datetime import datetime
             if isinstance(obj, Decimal):
                 return float(obj)
             elif isinstance(obj, dict):

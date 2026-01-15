@@ -21,6 +21,7 @@ class FinancialDataExtraction(BaseModel):
     非流动资产: Optional[float] = Field(default=None, description="非流动资产（非流动资产合计），单位：元")
     营业利润: Optional[float] = Field(default=None, description="营业利润，单位：元（可选）")
     总负债: Optional[float] = Field(default=None, description="总负债（负债合计），单位：元（可选）")
+    加权平均净资产收益率: Optional[float] = Field(default=None, description="加权平均净资产收益率（ROE），单位：百分比（如10.08表示10.08%），这是年报中直接披露的指标，优先使用")
     
     @field_validator('*', mode='before')
     @classmethod

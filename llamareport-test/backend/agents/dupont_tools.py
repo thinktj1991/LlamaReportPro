@@ -26,7 +26,8 @@ async def generate_dupont_analysis(
     company_name: str,
     year: str,
     query_engine,
-    financial_data: Optional[Dict[str, float]] = None
+    financial_data: Optional[Dict[str, float]] = None,
+    filename: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     生成杜邦分析报告
@@ -36,6 +37,7 @@ async def generate_dupont_analysis(
         year: 年份
         query_engine: LlamaIndex查询引擎
         financial_data: 可选的财务数据字典，如果不提供则从query_engine提取
+        filename: 可选的文件名，用于限制查询范围
         
     Returns:
         杜邦分析结果字典
@@ -47,11 +49,8 @@ async def generate_dupont_analysis(
         logger.info(f"开始生成杜邦分析: {company_name} - {year}")
         
         # 如果没有提供财务数据，从query_engine提取
+        # 使用结构化LLM输出方法，和 quick-overview 使用相同的方法，更准确
         if financial_data is None:
-            # 尝试从函数参数中获取filename（如果传递了）
-            filename = None
-            if hasattr(query_engine, '_filename'):
-                filename = query_engine._filename
             financial_data = await extract_financial_data_for_dupont(
                 company_name, year, query_engine, filename=filename
             )
@@ -188,18 +187,24 @@ async def extract_financial_data_for_dupont(
 5. 必须提取数值，不要使用"约"、"大约"等模糊表述
 6. 如果某个指标在文档中找不到，请设为null
 
-【需要提取的指标】（单位：元）
-1. 净利润（归属于母公司所有者的净利润、归母净利润）- 必填
-2. 营业收入（营业总收入、主营业务收入）- 必填
-3. 总资产（资产总计、资产合计）- 必填
-4. 股东权益（归属于母公司所有者权益、所有者权益合计）- 必填
-5. 流动资产（流动资产合计）- 必填
-6. 非流动资产（非流动资产合计）- 必填
-7. 营业利润 - 可选
-8. 总负债（负债合计）- 可选
+【需要提取的指标】
+1. 净利润（归属于母公司所有者的净利润、归母净利润）- 必填，单位：元
+2. 营业收入（营业总收入、主营业务收入）- 必填，单位：元
+3. 总资产（资产总计、资产合计）- 必填，单位：元
+4. 股东权益（归属于母公司所有者权益、所有者权益合计）- 必填，单位：元
+5. 流动资产（流动资产合计）- 必填，单位：元
+6. 非流动资产（非流动资产合计）- 必填，单位：元
+7. 加权平均净资产收益率（ROE、净资产收益率）- 重要，单位：百分比（如10.08表示10.08%），这是年报中直接披露的指标，请优先提取
+8. 营业利润 - 可选，单位：元
+9. 总负债（负债合计）- 可选，单位：元
 
 【数据来源】
 {context_text[:5000] if context_text else "请从所有已索引的文档中检索"}
+
+【重要提示】
+- 加权平均净资产收益率（ROE）是年报中直接披露的指标，请优先提取
+- 如果文档中有"加权平均净资产收益率"或"ROE"，请直接提取该值（百分比形式，如10.08表示10.08%）
+- 不要通过净利润/股东权益计算ROE，因为年报中的ROE是加权平均的，考虑了时间权重
 
 请准确提取数值，只返回数据，不要添加分析或说明。
 """
@@ -236,14 +241,25 @@ async def extract_financial_data_for_dupont(
             for key, value in structured_data.items():
                 if value is not None:
                     try:
-                        value_float = float(value)
-                        # 允许0和负值（某些财务指标可能为0或负）
-                        # 但过滤掉明显无效的值（如NaN、Infinity等）
-                        if not (value_float != value_float or abs(value_float) == float('inf')):
-                            financial_data[key] = value_float
-                            logger.info(f"提取指标 {key}: {value_float}")
+                        # 特殊处理：加权平均净资产收益率（ROE）是百分比，需要保持原值
+                        if key == '加权平均净资产收益率':
+                            value_float = float(value)
+                            # ROE通常是百分比形式（如10.08表示10.08%），不需要转换
+                            # 但需要验证合理性（通常在0-100之间）
+                            if 0 <= value_float <= 100:
+                                financial_data[key] = value_float
+                                logger.info(f"✅ 提取加权平均净资产收益率（ROE）: {value_float}%")
+                            else:
+                                logger.warning(f"⚠️ 加权平均净资产收益率值 {value_float} 超出合理范围 [0, 100]，跳过")
                         else:
-                            logger.warning(f"指标 {key} 的值无效: {value}")
+                            value_float = float(value)
+                            # 允许0和负值（某些财务指标可能为0或负）
+                            # 但过滤掉明显无效的值（如NaN、Infinity等）
+                            if not (value_float != value_float or abs(value_float) == float('inf')):
+                                financial_data[key] = value_float
+                                logger.info(f"提取指标 {key}: {value_float}")
+                            else:
+                                logger.warning(f"指标 {key} 的值无效: {value}")
                     except (ValueError, TypeError) as e:
                         logger.warning(f"无法转换指标 {key} 的值: {value}, 错误: {str(e)}")
             
@@ -269,18 +285,24 @@ async def extract_financial_data_for_dupont(
 4. 只提取{year}年度的数据
 5. 必须提取数值，不要使用"约"、"大约"等模糊表述
 
-【需要提取的指标】（单位：元）
-1. 净利润（归属于母公司所有者的净利润、归母净利润）- 必填
-2. 营业收入（营业总收入、主营业务收入）- 必填
-3. 总资产（资产总计、资产合计）- 必填
-4. 股东权益（归属于母公司所有者权益、所有者权益合计）- 必填
-5. 流动资产（流动资产合计）- 必填
-6. 非流动资产（非流动资产合计）- 必填
-7. 营业利润 - 可选
-8. 总负债（负债合计）- 可选
+【需要提取的指标】
+1. 净利润（归属于母公司所有者的净利润、归母净利润）- 必填，单位：元
+2. 营业收入（营业总收入、主营业务收入）- 必填，单位：元
+3. 总资产（资产总计、资产合计）- 必填，单位：元
+4. 股东权益（归属于母公司所有者权益、所有者权益合计）- 必填，单位：元
+5. 流动资产（流动资产合计）- 必填，单位：元
+6. 非流动资产（非流动资产合计）- 必填，单位：元
+7. 加权平均净资产收益率（ROE、净资产收益率）- 重要，单位：百分比（如10.08表示10.08%），这是年报中直接披露的指标，请优先提取
+8. 营业利润 - 可选，单位：元
+9. 总负债（负债合计）- 可选，单位：元
 
 【数据来源】
 {context_text[:5000] if context_text else "请从所有已索引的文档中检索"}
+
+【重要提示】
+- 加权平均净资产收益率（ROE）是年报中直接披露的指标，请优先提取
+- 如果文档中有"加权平均净资产收益率"或"ROE"，请直接提取该值（百分比形式，如10.08表示10.08%）
+- 不要通过净利润/股东权益计算ROE，因为年报中的ROE是加权平均的，考虑了时间权重
 
 【输出要求】
 请严格按照以下JSON格式返回，只包含数值（数字），不要包含单位、文字说明：
@@ -291,6 +313,7 @@ async def extract_financial_data_for_dupont(
   "股东权益": 数值（单位：元）,
   "流动资产": 数值（单位：元）,
   "非流动资产": 数值（单位：元）,
+  "加权平均净资产收益率": 数值（单位：百分比，如10.08表示10.08%）,
   "营业利润": 数值（单位：元，可选）,
   "总负债": 数值（单位：元，可选）
 }}
@@ -441,6 +464,14 @@ def parse_financial_data_response_enhanced(response_text: str, context_text: str
                 r'非流动资产[：:]\s*([\d,\.]+[万千百十亿]?元?)',
                 r'非流动资产合计[：:]\s*([\d,\.]+[万千百十亿]?元?)',
             ],
+            '加权平均净资产收益率': [
+                r'加权平均净资产收益率[|\s]+([\d,\.]+%?)',
+                r'加权平均净资产收益率[：:]\s*([\d,\.]+%?)',
+                r'ROE[|\s]+([\d,\.]+%?)',
+                r'ROE[：:]\s*([\d,\.]+%?)',
+                r'净资产收益率[|\s]+([\d,\.]+%?)',
+                r'净资产收益率[：:]\s*([\d,\.]+%?)',
+            ],
         }
         
         # 合并所有文本进行搜索
@@ -453,11 +484,27 @@ def parse_financial_data_response_enhanced(response_text: str, context_text: str
                 match = re.search(pattern, search_text, re.IGNORECASE)
                 if match:
                     value_str = match.group(1)
-                    value_clean = clean_numeric_string(value_str)
-                    if value_clean and value_clean > 0:
-                        financial_data[metric_name] = value_clean
-                        logger.info(f"从文本提取 {metric_name}: {value_clean}")
-                        break
+                    # 特殊处理：加权平均净资产收益率是百分比，不需要单位转换
+                    if metric_name == '加权平均净资产收益率':
+                        # 移除百分号，直接转换为float
+                        value_clean = value_str.replace('%', '').replace(',', '').strip()
+                        try:
+                            value_float = float(value_clean)
+                            # 验证合理性（通常在0-100之间）
+                            if 0 <= value_float <= 100:
+                                financial_data[metric_name] = value_float
+                                logger.info(f"✅ 从文本提取加权平均净资产收益率（ROE）: {value_float}%")
+                                break
+                            else:
+                                logger.warning(f"⚠️ 加权平均净资产收益率值 {value_float} 超出合理范围，跳过")
+                        except (ValueError, TypeError):
+                            logger.warning(f"⚠️ 无法解析加权平均净资产收益率值: {value_str}")
+                    else:
+                        value_clean = clean_numeric_string(value_str)
+                        if value_clean and value_clean > 0:
+                            financial_data[metric_name] = value_clean
+                            logger.info(f"从文本提取 {metric_name}: {value_clean}")
+                            break
         
         # 方法3：从表格格式中提取（如果context_text包含表格）
         if context_text and not financial_data:
@@ -542,6 +589,7 @@ def extract_from_table_format(text: str) -> Dict[str, float]:
         '股东权益': ['股东权益', '所有者权益'],
         '流动资产': ['流动资产'],
         '非流动资产': ['非流动资产'],
+        '加权平均净资产收益率': ['加权平均净资产收益率', 'ROE', '净资产收益率'],
     }
     
     for match in matches:
@@ -550,10 +598,22 @@ def extract_from_table_format(text: str) -> Dict[str, float]:
         
         for key, keywords in metric_keywords.items():
             if any(kw in metric_name for kw in keywords):
-                value_clean = clean_numeric_string(value_str)
-                if value_clean and key not in financial_data:
-                    financial_data[key] = value_clean
-                    break
+                # 特殊处理：加权平均净资产收益率是百分比
+                if key == '加权平均净资产收益率':
+                    value_clean = value_str.replace('%', '').replace(',', '').strip()
+                    try:
+                        value_float = float(value_clean)
+                        if 0 <= value_float <= 100 and key not in financial_data:
+                            financial_data[key] = value_float
+                            logger.info(f"✅ 从表格提取加权平均净资产收益率（ROE）: {value_float}%")
+                            break
+                    except (ValueError, TypeError):
+                        pass
+                else:
+                    value_clean = clean_numeric_string(value_str)
+                    if value_clean and key not in financial_data:
+                        financial_data[key] = value_clean
+                        break
     
     return financial_data
 

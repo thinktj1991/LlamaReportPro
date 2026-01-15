@@ -95,12 +95,26 @@ class MetricAttribution(BaseModel):
     change_reasons: str = Field(description="变动原因分析")
 
 
+class FinancialStatementTable(BaseModel):
+    """财务报表表格视图"""
+    title: str = Field(description="表格标题")
+    headers: List[str] = Field(description="表头")
+    rows: List[List[str]] = Field(description="表格行数据")
+
+
+class FinancialStatementTables(BaseModel):
+    """财务报表可视化表格集合"""
+    balance_sheet_assets: FinancialStatementTable = Field(description="资产结构表")
+    balance_sheet_liabilities: FinancialStatementTable = Field(description="负债结构表")
+    income_statement_revenue: FinancialStatementTable = Field(description="营业收入结构表")
+    income_statement_expense: FinancialStatementTable = Field(description="营业支出结构表")
+    cash_flow: FinancialStatementTable = Field(description="现金流量明细表")
+
+
 class FinancialReview(BaseModel):
     """财务点评(第一部分)"""
-    charts: FinancialCharts = Field(description="财务图表")
-    performance_summary: PerformanceSummary = Field(description="业绩速览")
-    performance_comparison: PerformanceComparison = Field(description="业绩和预期的比较")
-    metrics_attribution: List[MetricAttribution] = Field(description="财务指标变动归因列表")
+    summary: str = Field(description="财务点评总结")
+    visualization_tables: FinancialStatementTables = Field(description="财务报表可视化表格")
 
 
 # ==================== 业绩指引模型 ====================

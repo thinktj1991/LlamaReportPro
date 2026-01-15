@@ -13,22 +13,25 @@ from models.report_models import (
     BusinessGuidance,
     BusinessHighlights,
     ProfitForecastAndValuation,
-    PerformanceSummary,
-    FinancialMetrics,
-    FinancialIndicator,
-    FinancialCharts,
-    PerformanceComparison,
-    MetricAttribution,
     BusinessHighlight,
     ConsensusForecas,
-    ValuationAnalysis
+    ValuationAnalysis,
+    FinancialStatementTable,
+    FinancialStatementTables
 )
 from agents.visualization_agent import generate_visualization_for_query
 
 logger = logging.getLogger(__name__)
 
 
-def _create_default_financial_review(company_name: str, year: str, parsed_data: Optional[Dict], revenue_data: str, profit_data: str, cash_flow_data: str) -> FinancialReview:
+def _create_default_financial_review(
+    company_name: str,
+    year: str,
+    parsed_data: Optional[Dict],
+    balance_sheet_data: str,
+    income_statement_data: str,
+    cash_flow_data: str
+) -> FinancialReview:
     """
     创建默认的FinancialReview结构，当JSON解析或验证失败时使用
     
@@ -36,62 +39,90 @@ def _create_default_financial_review(company_name: str, year: str, parsed_data: 
         company_name: 公司名称
         year: 年份
         parsed_data: 部分解析的数据（如果有）
-        revenue_data: 收入数据
-        profit_data: 利润数据
-        cash_flow_data: 现金流数据
+        balance_sheet_data: 资产负债表数据
+        income_statement_data: 利润表数据
+        cash_flow_data: 现金流量表数据
     
     Returns:
         FinancialReview对象
     """
-    from models.report_models import (
-        FinancialCharts, PerformanceSummary, PerformanceComparison, MetricAttribution,
-        FinancialMetrics, FinancialIndicator
-    )
-    
-    # 创建默认的图表描述
-    charts = FinancialCharts(
-        charts=["利润表", "资产负债表", "现金流量表"]
-    )
-    
-    # 创建默认的财务指标
-    financial_metrics = FinancialMetrics(
-        revenue=FinancialIndicator(value="待提取", formatted_value="待提取"),
-        gross_margin=FinancialIndicator(value="待提取", formatted_value="待提取"),
-        operating_profit=FinancialIndicator(value="待提取", formatted_value="待提取"),
-        net_profit=FinancialIndicator(value="待提取", formatted_value="待提取"),
-        parent_net_profit=FinancialIndicator(value="待提取", formatted_value="待提取"),
-        eps=FinancialIndicator(value="待提取", formatted_value="待提取")
-    )
-    
-    # 创建默认的业绩速览
-    performance_summary = PerformanceSummary(
-        company_name=company_name,
-        report_year=year,
-        financial_metrics=financial_metrics,
-        summary=f"基于提供的财务数据，{company_name} {year}年的财务表现需要进一步分析。收入数据：{revenue_data[:200]}...；利润数据：{profit_data[:200]}...；现金流数据：{cash_flow_data[:200]}..."
-    )
-    
-    # 创建默认的业绩比较
-    performance_comparison = PerformanceComparison(
-        comparison_table=[],
-        summary="暂无业绩指引数据，无法进行对比分析"
-    )
-    
-    # 创建默认的指标归因
-    metrics_attribution = [
-        MetricAttribution(
-            metric_name="营业收入",
-            change_description="需要进一步分析数据",
-            change_reasons="需要进一步分析数据以确定变动原因"
+    def _build_default_table(title: str, metric_names: List[str]) -> FinancialStatementTable:
+        table_years = [year]
+        if year.isdigit():
+            prev_year = str(int(year) - 1)
+            table_years.append(prev_year)
+        headers = ["指标"] + table_years + ["同比变动"]
+        rows = []
+        for metric in metric_names:
+            rows.append([metric] + ["/" for _ in table_years] + ["/"])
+        return FinancialStatementTable(title=title, headers=headers, rows=rows)
+
+    visualization_tables = FinancialStatementTables(
+        balance_sheet_assets=_build_default_table(
+            "资产结构表",
+            [
+                "资产总额",
+                "发放贷款及垫款",
+                "个人贷款",
+                "企业贷款",
+                "投资类金融资产",
+                "现金及存放央行款项",
+                "存放同业款项"
+            ]
+        ),
+        balance_sheet_liabilities=_build_default_table(
+            "负债结构表",
+            [
+                "负债总额",
+                "吸收存款",
+                "个人存款",
+                "企业存款",
+                "向央行借款",
+                "同业负债",
+                "已发行债务证券",
+                "卖出回购金融资产"
+            ]
+        ),
+        income_statement_revenue=_build_default_table(
+            "营业收入结构表",
+            [
+                "营业收入合计",
+                "利息净收入",
+                "非利息净收入",
+                "手续费及佣金净收入",
+                "其他非利息净收入",
+                "投资收益",
+                "公允价值变动损益"
+            ]
+        ),
+        income_statement_expense=_build_default_table(
+            "营业支出结构表",
+            [
+                "营业支出合计",
+                "业务及管理费",
+                "信用及其他资产减值损失",
+                "税金及附加"
+            ]
+        ),
+        cash_flow=_build_default_table(
+            "现金流量明细",
+            [
+                "经营活动现金流",
+                "投资活动现金流",
+                "筹资活动现金流",
+                "现金净变动额"
+            ]
         )
-    ]
-    
-    return FinancialReview(
-        charts=charts,
-        performance_summary=performance_summary,
-        performance_comparison=performance_comparison,
-        metrics_attribution=metrics_attribution
     )
+
+    summary = (
+        f"基于提供的数据，{company_name} {year}年的财务表现需要进一步核验。"
+        f"资产负债表数据：{balance_sheet_data[:200]}..."
+        f"利润表数据：{income_statement_data[:200]}..."
+        f"现金流量表数据：{cash_flow_data[:200]}..."
+    )
+
+    return FinancialReview(summary=summary, visualization_tables=visualization_tables)
 
 
 def _validate_and_clean_data(data: Dict[str, Any], model_class) -> Dict[str, Any]:
@@ -156,7 +187,7 @@ def create_query_engine_tool(query_engine, name: str, description: str) -> Query
 def retrieve_financial_data(
     company_name: Annotated[str, "公司名称"],
     year: Annotated[str, "年份,如'2023'"],
-    metric_type: Annotated[str, "指标类型: revenue(收入), profit(利润), cash_flow(资产总额), balance_sheet(资产负债)"],
+    metric_type: Annotated[str, "指标类型: balance_sheet_detailed, income_statement_detailed, cash_flow_detailed 等"],
     query_engine: Any
 ) -> str:
     """
@@ -179,10 +210,23 @@ def retrieve_financial_data(
         logger.debug(f"🔍 [retrieve_financial_data] 开始检索: {company_name} {year}年 {metric_type}")
         # 构建查询
         query_map = {
-            "revenue": f"{company_name} {year}年 营业收入 收入增长率 毛利率",
-            "profit": f"{company_name} {year}年 净利润 归母净利润 扣非净利润 利润增长率",
-            "cash_flow": f"{company_name} {year}年 资产总额 总资产 资产合计",
-            "balance_sheet": f"{company_name} {year}年 总资产 总负债 资产负债率 净资产"
+            "balance_sheet_detailed": (
+                f"{company_name} {year}年 资产负债表 "
+                "资产总额 发放贷款及垫款 个人贷款 企业贷款 投资类金融资产 "
+                "现金及存放央行款项 存放同业款项 "
+                "负债总额 吸收存款 个人存款 企业存款 向央行借款 同业负债 "
+                "已发行债务证券 卖出回购金融资产"
+            ),
+            "income_statement_detailed": (
+                f"{company_name} {year}年 利润表 "
+                "营业收入合计 利息净收入 非利息净收入 手续费及佣金净收入 "
+                "其他非利息净收入 投资收益 公允价值变动损益 "
+                "营业支出合计 业务及管理费 信用及其他资产减值损失 税金及附加"
+            ),
+            "cash_flow_detailed": (
+                f"{company_name} {year}年 现金流量表 "
+                "经营活动现金流 投资活动现金流 筹资活动现金流 现金净变动额"
+            )
         }
         
         query = query_map.get(metric_type, f"{company_name} {year}年 {metric_type}")
@@ -307,7 +351,7 @@ def retrieve_business_data(
 
 
 # ==================== 章节生成工具 ====================
-
+# 财务点评
 async def generate_financial_review(
     company_name: Annotated[str, "公司名称"],
     year: Annotated[str, "年份,如'2023'"],
@@ -317,10 +361,8 @@ async def generate_financial_review(
     生成财务点评章节
     
     包括:
-    1. 财务图表描述
-    2. 业绩速览
-    3. 业绩和预期的比较
-    4. 财务指标变动归因
+    1. 财务点评总结
+    2. 财务报表可视化表格
     
     Args:
         company_name: 公司名称
@@ -328,27 +370,27 @@ async def generate_financial_review(
         query_engine: 查询引擎
     
     Returns:
-        财务点评的结构化数据
+        财务点评的结构化数据（总结 + 表格）
     """
     import time
     tool_start_time = time.time()
     try:
         logger.info(f"🔧 [generate_financial_review] 开始生成财务点评: {company_name} {year}年")
         
-        # 1. 检索财务数据 - 添加性能监控
+        # 1. 检索财务报表数据 - 添加性能监控
         data_retrieval_start = time.time()
         try:
-            revenue_data = retrieve_financial_data(company_name, year, "revenue", query_engine)
-            revenue_time = time.time() - data_retrieval_start
-            logger.info(f"✅ [generate_financial_review] 收入数据检索完成，耗时: {revenue_time:.2f}秒")
+            balance_sheet_data = retrieve_financial_data(company_name, year, "balance_sheet_detailed", query_engine)
+            balance_sheet_time = time.time() - data_retrieval_start
+            logger.info(f"✅ [generate_financial_review] 资产负债表数据检索完成，耗时: {balance_sheet_time:.2f}秒")
             
-            profit_start = time.time()
-            profit_data = retrieve_financial_data(company_name, year, "profit", query_engine)
-            profit_time = time.time() - profit_start
-            logger.info(f"✅ [generate_financial_review] 利润数据检索完成，耗时: {profit_time:.2f}秒")
+            income_statement_start = time.time()
+            income_statement_data = retrieve_financial_data(company_name, year, "income_statement_detailed", query_engine)
+            income_statement_time = time.time() - income_statement_start
+            logger.info(f"✅ [generate_financial_review] 利润表数据检索完成，耗时: {income_statement_time:.2f}秒")
             
             cashflow_start = time.time()
-            cash_flow_data = retrieve_financial_data(company_name, year, "cash_flow", query_engine)
+            cash_flow_data = retrieve_financial_data(company_name, year, "cash_flow_detailed", query_engine)
             cashflow_time = time.time() - cashflow_start
             logger.info(f"✅ [generate_financial_review] 现金流数据检索完成，耗时: {cashflow_time:.2f}秒")
             
@@ -365,16 +407,16 @@ async def generate_financial_review(
         llm = Settings.llm
 
         prompt = f"""
-作为资深财务分析师，请基于以下财务数据，生成{company_name} {year}年度的专业财务点评报告。
+作为资深财务分析师，请基于以下财务数据，生成{company_name} {year}年度的财务点评总结，并构建可视化表格视图。
 
 ## 数据来源
 以下数据均来自{company_name} {year}年度年报：
 
-### 收入数据
-{revenue_data}
+### 资产负债表数据
+{balance_sheet_data}
 
-### 利润数据
-{profit_data}
+### 利润表数据
+{income_statement_data}
 
 ### 现金流数据
 {cash_flow_data}
@@ -382,27 +424,30 @@ async def generate_financial_review(
 ## 分析要求
 请生成结构化的财务点评，要求如下：
 
-### 1. 财务图表描述
-- 识别年报中的主要财务图表（如利润表、资产负债表、现金流量表等）
-- 描述每个图表的核心内容和关键指标
-- 说明图表反映的财务趋势和特征
+### 1. 财务点评总结
+- 只输出一段财务点评总结，避免拆分为多个小节
+- 总结需覆盖资产端、负债端、利润端、现金流的关键变化与特点
+- 字数控制在200-300字左右
 
-### 2. 业绩速览
-- 提取并分析核心财务指标（收入、利润、资产总额、ROE、ROA等）
-- 计算关键财务比率（如毛利率、净利率、资产周转率等）
-- 对比分析同比和环比变化
-- 识别财务表现的主要特征和亮点
+### 2. 可视化表格视图（必须输出）
+请基于资产负债表、利润表、现金流量表构建如下表格：
 
-### 3. 业绩和预期的比较
-- 如有业绩预告或指引，进行对比分析
-- 分析实际业绩与预期的差异及原因
-- 评估业绩达成情况和质量
+#### 资产负债表
+- 资产结构表（指标）：资产总额、发放贷款及垫款、个人贷款、企业贷款、投资类金融资产、现金及存放央行款项、存放同业款项
+- 负债结构表（指标）：负债总额、吸收存款、个人存款、企业存款、向央行借款、同业负债、已发行债务证券、卖出回购金融资产
 
-### 4. 财务指标变动归因
-- 深入分析各主要财务指标的变动原因
-- 区分内部因素（经营效率、成本控制等）和外部因素（市场环境、政策影响等）
-- 识别驱动业绩变化的关键因素
-- 评估各因素对业绩的影响程度
+#### 利润表
+- 营业收入结构表（指标）：营业收入合计、利息净收入、非利息净收入、手续费及佣金净收入、其他非利息净收入、投资收益、公允价值变动损益
+- 营业支出结构表（指标）：营业支出合计、业务及管理费、信用及其他资产减值损失、税金及附加
+
+#### 现金流量表
+- 现金流量明细（指标）：经营活动现金流、投资活动现金流、筹资活动现金流、现金净变动额
+
+### 表格输出规范
+- 表头必须包含：指标、年份（不同年份的数据）、同比变动
+- 年份列优先使用{year}和{str(int(year) - 1) if year.isdigit() else year}；如无法获取上一年数据，使用"/"
+- 没有检索到的数据用"/"
+- 同比变动如无法计算或缺失，使用"/"
 
 ## ⚠️ 严格输出要求（必须遵守）
 你必须输出一个有效的JSON对象，且仅输出JSON，不要有任何其他文字说明。
@@ -418,37 +463,45 @@ async def generate_financial_review(
 
 ### JSON结构（必须严格遵循）：
 {{
-  "charts": {{
-    "charts": ["图表1描述", "图表2描述", ...]
-  }},
-  "performance_summary": {{
-    "company_name": "{company_name}",
-    "report_year": "{year}",
-    "financial_metrics": {{
-      "revenue": {{"name": "营业收入", "value": "数值", "change_rate": "变化率", "change_direction": "增长/下降"}},
-      "gross_margin": {{"name": "毛利率", "value": "数值", "change_rate": "变化率", "change_direction": "增长/下降"}},
-      "operating_profit": {{"name": "营业利润", "value": "数值", "change_rate": "变化率", "change_direction": "增长/下降"}},
-      "net_profit": {{"name": "净利润", "value": "数值", "change_rate": "变化率", "change_direction": "增长/下降"}},
-      "parent_net_profit": {{"name": "归母净利润", "value": "数值", "change_rate": "变化率", "change_direction": "增长/下降"}},
-      "eps": {{"name": "摊薄每股收益", "value": "数值", "change_rate": "变化率", "change_direction": "增长/下降"}}
+  "summary": "财务点评总结文字",
+  "visualization_tables": {{
+    "balance_sheet_assets": {{
+      "title": "资产结构表",
+      "headers": ["指标", "{year}", "{str(int(year) - 1) if year.isdigit() else year}", "同比变动"],
+      "rows": [
+        ["资产总额", "数值", "数值", "同比变动"],
+        ["发放贷款及垫款", "数值", "数值", "同比变动"]
+      ]
     }},
-    "summary": "业绩速览总结文字"
-  }},
-  "performance_comparison": {{
-    "comparison_table": [
-      {{"项目": "营业收入", "实际值": "数值", "预告值": "数值", "比较结果": "达成/未达成"}},
-      ...
-    ],
-    "summary": "对比总结文字"
-  }},
-  "metrics_attribution": [
-    {{
-      "metric_name": "指标名称",
-      "change_description": "变动情况描述",
-      "change_reasons": "变动原因分析"
+    "balance_sheet_liabilities": {{
+      "title": "负债结构表",
+      "headers": ["指标", "{year}", "{str(int(year) - 1) if year.isdigit() else year}", "同比变动"],
+      "rows": [
+        ["负债总额", "数值", "数值", "同比变动"]
+      ]
     }},
-    ...
-  ]
+    "income_statement_revenue": {{
+      "title": "营业收入结构表",
+      "headers": ["指标", "{year}", "{str(int(year) - 1) if year.isdigit() else year}", "同比变动"],
+      "rows": [
+        ["营业收入合计", "数值", "数值", "同比变动"]
+      ]
+    }},
+    "income_statement_expense": {{
+      "title": "营业支出结构表",
+      "headers": ["指标", "{year}", "{str(int(year) - 1) if year.isdigit() else year}", "同比变动"],
+      "rows": [
+        ["营业支出合计", "数值", "数值", "同比变动"]
+      ]
+    }},
+    "cash_flow": {{
+      "title": "现金流量明细",
+      "headers": ["指标", "{year}", "{str(int(year) - 1) if year.isdigit() else year}", "同比变动"],
+      "rows": [
+        ["经营活动现金流", "数值", "数值", "同比变动"]
+      ]
+    }}
+  }}
 }}
 
 ### 重要提示：
@@ -633,7 +686,14 @@ async def generate_financial_review(
                     except Exception as validation_error:
                         logger.warning(f"⚠️ JSON验证失败，生成默认结构: {str(validation_error)}")
                         # 生成默认的FinancialReview结构
-                        response = _create_default_financial_review(company_name, year, parsed_data, revenue_data, profit_data, cash_flow_data)
+                        response = _create_default_financial_review(
+                            company_name,
+                            year,
+                            parsed_data,
+                            balance_sheet_data,
+                            income_statement_data,
+                            cash_flow_data
+                        )
                         logger.info(f"✅ 使用默认结构生成财务点评")
                 else:
                     raise ValueError("无法从响应中提取JSON")
@@ -645,7 +705,14 @@ async def generate_financial_review(
                 logger.error(f"[generate_financial_review] 回退错误堆栈:\n{traceback.format_exc()}")
                 # 即使失败，也生成一个基本的响应，避免完全失败
                 try:
-                    response = _create_default_financial_review(company_name, year, None, revenue_data, profit_data, cash_flow_data)
+                    response = _create_default_financial_review(
+                        company_name,
+                        year,
+                        None,
+                        balance_sheet_data,
+                        income_statement_data,
+                        cash_flow_data
+                    )
                     final_time = time.time() - structured_llm_start
                     logger.info(f"✅ [generate_financial_review] 使用默认结构作为最终回退方案，总耗时: {final_time:.2f}秒")
                 except Exception as final_error:

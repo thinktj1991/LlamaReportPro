@@ -745,7 +745,8 @@ class DupontAnalyzer:
             'current_assets': ['流动资产', 'current_assets'],
             'non_current_assets': ['非流动资产', 'non_current_assets', '长期资产', '非流动资产合计'],
             'operating_profit': ['营业利润', 'operating_profit', 'operating_income', 'ebit'],
-            'total_liabilities': ['总负债', 'total_liabilities', 'liabilities', '负债合计']
+            'total_liabilities': ['总负债', 'total_liabilities', 'liabilities', '负债合计'],
+            'weighted_avg_roe': ['加权平均净资产收益率', 'weighted_avg_roe', 'roe', '净资产收益率', '加权平均ROE']
         }
 
     def calculate_dupont_analysis(
@@ -797,6 +798,14 @@ class DupontAnalyzer:
         non_current_assets = normalized_data.get('non_current_assets', 0)
         operating_profit = normalized_data.get('operating_profit', None)
         total_liabilities = normalized_data.get('total_liabilities', None)
+        
+        # 优先使用提取到的加权平均净资产收益率（ROE）
+        # 这是年报中直接披露的指标，比通过计算得到的ROE更准确
+        weighted_avg_roe = normalized_data.get('weighted_avg_roe', None)
+        if weighted_avg_roe is not None:
+            logger.info(f"使用提取到的加权平均净资产收益率: {weighted_avg_roe}%")
+        else:
+            logger.info("未提取到加权平均净资产收益率，将通过计算得到ROE")
 
         # 第三层：底层数据
         level3_net_income = self._create_metric(
@@ -847,11 +856,20 @@ class DupontAnalyzer:
         )
 
         # 顶层：ROE
-        roe = (net_income / shareholders_equity * 100) if shareholders_equity > 0 else 0
+        # 优先使用提取到的加权平均净资产收益率（年报中直接披露的指标）
+        # 如果未提取到，则通过计算得到（净利润/股东权益）
+        if weighted_avg_roe is not None:
+            roe = float(weighted_avg_roe)
+            logger.info(f"✅ 使用年报中直接披露的加权平均净资产收益率: {roe}%")
+            roe_formula = "ROE = 加权平均净资产收益率（年报披露）"
+        else:
+            roe = (net_income / shareholders_equity * 100) if shareholders_equity > 0 else 0
+            logger.info(f"⚠️ 未提取到加权平均净资产收益率，通过计算得到ROE: {roe}% (净利润/股东权益)")
+            roe_formula = "ROE = 资产净利率 × 权益乘数 = 净利润 / 股东权益"
 
         level1_roe = self._create_metric(
             "净资产收益率", roe, 1,
-            "ROE = 资产净利率 × 权益乘数", None, "%"
+            roe_formula, None, "%"
         )
 
         # 构建层级结构
@@ -932,6 +950,7 @@ class DupontAnalyzer:
                 if any(name.lower() in key.lower() or key.lower() in name.lower()
                        for name in possible_names):
                     normalized[standard_name] = float(value)
+                    logger.info(f"标准化指标: {key} -> {standard_name} = {value}")
                     break
 
         return normalized

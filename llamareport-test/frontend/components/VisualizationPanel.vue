@@ -146,8 +146,27 @@
             </div>
             <div class="viz-card-content">
               <div v-if="card.data && card.data.has_visualization" class="chart-card-content">
+                <!-- 财务表格 -->
+                <div v-if="card.type === 'financial_table' && card.data.table" class="table-container">
+                  <table class="financial-table">
+                    <thead>
+                      <tr>
+                        <th v-for="(header, hIdx) in card.data.table.headers" :key="hIdx">
+                          {{ header }}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(row, rIdx) in card.data.table.rows" :key="rIdx">
+                        <td v-for="(cell, cIdx) in row" :key="cIdx">
+                          {{ cell }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
                 <!-- Timeline时间轴（纵向布局，紧凑型） -->
-                <div v-if="card.data.visualization_type === 'timeline' && card.data.timeline_data" 
+                <div v-else-if="card.data.visualization_type === 'timeline' && card.data.timeline_data" 
                      class="timeline-container">
                   <div class="custom-timeline">
                     <div 
@@ -172,7 +191,7 @@
                 </div>
                 
                 <!-- 推荐说明 -->
-                <div v-if="card.data.recommendation" class="recommendation-box">
+                <div v-if="card.data.recommendation && card.type !== 'financial_table'" class="recommendation-box">
                   <h4>📈 图表推荐</h4>
                   <p><strong>推荐图表类型:</strong> 
                     <span>{{ getChartTypeName(getActualChartType(card.data)) }}</span>
@@ -181,7 +200,7 @@
                 </div>
                 
                 <!-- 数据洞察 -->
-                <div v-if="card.data.insights && card.data.insights.length > 0" class="insights-box">
+                <div v-if="card.data.insights && card.data.insights.length > 0 && card.type !== 'financial_table'" class="insights-box">
                   <h3>💡 数据洞察</h3>
                   <div 
                     v-for="(insight, index) in card.data.insights" 
@@ -440,6 +459,9 @@ export default {
       return metricObj.formula || ''
     },
     renderChart(cardId, chartData) {
+      if (chartData?.type === 'financial_table') {
+        return;
+      }
       // 如果是Timeline类型，不需要渲染（由Vue模板直接渲染）
       if (chartData?.visualization_type === 'timeline' && chartData?.timeline_data) {
         console.log(`🎨 Timeline类型，由Vue模板直接渲染: ${cardId}`);
