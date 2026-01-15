@@ -1883,6 +1883,52 @@ body {
     padding: 12px 16px;
 }
 
+/* 财务表格卡片 */
+.table-container {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 360px;
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.financial-table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: collapse;
+    font-size: 0.75rem;
+    line-height: 1.2;
+    color: #1f2937;
+}
+
+.financial-table th,
+.financial-table td {
+    padding: 6px 10px;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+    text-align: left;
+    white-space: nowrap;
+}
+
+.financial-table thead th {
+    position: sticky;
+    top: 0;
+    background: #f8fafc;
+    z-index: 1;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.financial-table tbody tr:hover {
+    background: rgba(148, 163, 184, 0.12);
+}
+
+.financial-table td:first-child,
+.financial-table th:first-child {
+    min-width: 120px;
+}
+
 .chart-header-inline {
     display: flex;
     align-items: center;

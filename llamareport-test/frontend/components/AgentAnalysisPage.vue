@@ -397,12 +397,22 @@ export default {
           if (result.visualization && result.visualization.has_visualization) {
             console.log('📊 [AgentAnalysisPage] 添加可视化数据')
             if (result.visualization.type === 'financial_tables' && Array.isArray(result.visualization.tables)) {
+              const getTableSourceLabel = (title = '') => {
+                if (title.includes('资产') || title.includes('负债')) return '资产负债表'
+                if (title.includes('营业收入') || title.includes('营业支出') || title.includes('收入') || title.includes('支出') || title.includes('利润')) return '利润表'
+                if (title.includes('现金流')) return '现金流量表'
+                return '财务报表'
+              }
+              const formatTableTitle = (title) => {
+                const base = title || '财务表格'
+                return `${base}（${getTableSourceLabel(base)}）`
+              }
               result.visualization.tables
                 .filter(table => table)
                 .forEach((table, idx) => {
                   this.visualizations.push({
                     id: `${Date.now().toString()}-${idx}`,
-                    question: table.title || '财务表格',
+                    question: formatTableTitle(table.title),
                     data: {
                       has_visualization: true,
                       type: 'financial_table',

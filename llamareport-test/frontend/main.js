@@ -424,6 +424,16 @@ const App = {
         if (result.status === 'success') {
           let answerText = result.content || ''
           const visualization = result.visualization
+          const getTableSourceLabel = (title = '') => {
+            if (title.includes('资产') || title.includes('负债')) return '资产负债表'
+            if (title.includes('营业收入') || title.includes('营业支出') || title.includes('收入') || title.includes('支出') || title.includes('利润')) return '利润表'
+            if (title.includes('现金流')) return '现金流量表'
+            return '财务报表'
+          }
+          const formatTableTitle = (title) => {
+            const base = title || '财务表格'
+            return `${base}（${getTableSourceLabel(base)}）`
+          }
           
           if (sectionName === 'financial_review') {
             const structured = result.structured_response || {}
@@ -447,7 +457,7 @@ const App = {
               tableList.forEach((table, idx) => {
                 visualizationCards.value.push({
                   id: `${Date.now().toString()}-${idx}`,
-                  question: table.title || '财务表格',
+                  question: formatTableTitle(table.title),
                   timestamp: new Date(),
                   data: {
                     has_visualization: true,
@@ -466,7 +476,7 @@ const App = {
               .forEach((table, idx) => {
                 visualizationCards.value.push({
                   id: `${Date.now().toString()}-${idx}`,
-                  question: table.title || '财务表格',
+                  question: formatTableTitle(table.title),
                   timestamp: new Date(),
                   data: {
                     has_visualization: true,
