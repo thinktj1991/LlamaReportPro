@@ -32,7 +32,7 @@
               </div>
               <div class="viz-card-header-right">
                 <div v-if="dupontData.full_data" class="viz-card-meta">
-                  <span>{{ dupontData.full_data.company_name || '未知公司' }} - {{ dupontData.full_data.report_year || '未知年份' }}</span>
+                  <span>{{ dupontData.full_data.report_year || '未知年份' }}</span>
                 </div>
                 <div class="viz-card-actions">
                   <button class="viz-card-close" @click="removeDupontCard" title="删除">×</button>

@@ -2183,33 +2183,57 @@ async def _extract_core_metrics(rag_engine, existing_metrics: Dict, context_filt
     """
     metrics = {}
     
-    # 1. ROE - 盈利能力（优先使用财务概况数据）
+    # 1. ROE - 盈利能力（优先使用文档披露值，缺失则计算）
     roe_value = None
     roe_source = None
     
-    # 优先级1: 财务概况数据
-    if overview_data and overview_data.get('roe'):
+    # 优先级1: 从文档检索（加权平均净资产收益率/ROE/净资产收益率）
+    roe_value = await _retrieve_metric(rag_engine, "加权平均净资产收益率 ROE 净资产收益率", context_filter)
+    if roe_value is not None:
+        roe_source = 'document'
+        logger.info(f"✅ 从文档检索ROE: {roe_value}%")
+    else:
+        logger.info("❌ 未从文档检索到ROE，尝试计算ROE")
+    
+    # 优先级2: 文档缺失时尝试计算（净利润 / 股东权益）
+    if roe_value is None:
+        net_profit_for_roe = await _retrieve_metric(
+            rag_engine,
+            "净利润 归属于母公司所有者的净利润 归母净利润",
+            context_filter
+        )
+        equity_for_roe = await _retrieve_metric(
+            rag_engine,
+            "股东权益 所有者权益 归属于母公司所有者权益",
+            context_filter
+        )
+        
+        if net_profit_for_roe is not None and equity_for_roe is not None and equity_for_roe != 0:
+            roe_value = (net_profit_for_roe / equity_for_roe) * 100
+            roe_source = 'calculated'
+            logger.info(
+                f"✅ 计算ROE: {roe_value:.2f}% (净利润: {net_profit_for_roe}, 股东权益: {equity_for_roe})"
+            )
+        else:
+            logger.warning(
+                f"❌ 无法计算ROE（净利润: {net_profit_for_roe}, 股东权益: {equity_for_roe}）"
+            )
+    
+    # 兜底：如果仍缺失，尝试财务概况或已有卡片
+    if roe_value is None and overview_data and overview_data.get('roe'):
         roe_obj = overview_data['roe']
         if isinstance(roe_obj, dict) and not roe_obj.get('is_missing'):
             roe_value_str = roe_obj.get('value', '')
             if roe_value_str and roe_value_str != '—':
-                # 提取数值（去除%和单位）
                 roe_value = _parse_metric_value(roe_value_str)
                 roe_source = 'overview'
                 logger.info(f"✅ 从财务概况获取ROE: {roe_value}%")
     
-    # 优先级2: 已有卡片
     if roe_value is None and 'roe' in existing_metrics:
         roe_value = _extract_value_from_card(existing_metrics['roe'], ['ROE', '净资产收益率', '加权平均净资产收益率'])
         if roe_value is not None:
             roe_source = 'existing_card'
             logger.info(f"✅ 从已有卡片获取ROE: {roe_value}%")
-    
-    # 优先级3: 从文档检索
-    if roe_value is None:
-        roe_value = await _retrieve_metric(rag_engine, "加权平均净资产收益率 ROE", context_filter)
-        roe_source = 'retrieved'
-        logger.info(f"{'✅' if roe_value else '❌'} 从文档检索ROE: {roe_value}%")
     
     metrics['roe'] = {'value': roe_value, 'unit': '%', 'source': roe_source}
     print(f"📊 [指标提取] ROE: {roe_value}% (来源: {roe_source})")

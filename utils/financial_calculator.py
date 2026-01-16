@@ -746,7 +746,11 @@ class DupontAnalyzer:
             'non_current_assets': ['非流动资产', 'non_current_assets', '长期资产', '非流动资产合计'],
             'operating_profit': ['营业利润', 'operating_profit', 'operating_income', 'ebit'],
             'total_liabilities': ['总负债', 'total_liabilities', 'liabilities', '负债合计'],
-            'weighted_avg_roe': ['加权平均净资产收益率', 'weighted_avg_roe', 'roe', '净资产收益率', '加权平均ROE']
+            'weighted_avg_roe': ['加权平均净资产收益率', 'weighted_avg_roe', 'roe', '净资产收益率', '加权平均ROE'],
+            'roa': ['总资产收益率', '平均总资产收益率', '总资产报酬率', 'ROA', '资产净利率', 'return_on_assets'],
+            'net_profit_margin': ['营业净利润率', '净利率', 'net_profit_margin'],
+            'asset_turnover': ['资产周转率', '总资产周转率', 'asset_turnover'],
+            'equity_multiplier': ['权益乘数', 'equity_multiplier']
         }
 
     def calculate_dupont_analysis(
@@ -790,12 +794,12 @@ class DupontAnalyzer:
         normalized_data = self._normalize_financial_data(financial_data)
 
         # 提取关键指标
-        net_income = normalized_data.get('net_income', 0)
-        revenue = normalized_data.get('revenue', 0)
-        total_assets = normalized_data.get('total_assets', 0)
-        shareholders_equity = normalized_data.get('shareholders_equity', 0)
-        current_assets = normalized_data.get('current_assets', 0)
-        non_current_assets = normalized_data.get('non_current_assets', 0)
+        net_income = normalized_data.get('net_income')
+        revenue = normalized_data.get('revenue')
+        total_assets = normalized_data.get('total_assets')
+        shareholders_equity = normalized_data.get('shareholders_equity')
+        current_assets = normalized_data.get('current_assets')
+        non_current_assets = normalized_data.get('non_current_assets')
         operating_profit = normalized_data.get('operating_profit', None)
         total_liabilities = normalized_data.get('total_liabilities', None)
         
@@ -821,17 +825,20 @@ class DupontAnalyzer:
             "非流动资产", non_current_assets, 3, "非流动资产", "总资产", "元"
         )
 
-        # 第二层：计算比率
-        net_profit_margin = (net_income / revenue * 100) if revenue > 0 else 0
-        asset_turnover = (revenue / total_assets) if total_assets > 0 else 0
+        # 第二层：比率（仅使用文档披露或派生值，不自行计算）
+        net_profit_margin = normalized_data.get('net_profit_margin')
+        net_profit_margin_formula = "营业净利润率（文档披露/派生）" if net_profit_margin is not None else "营业净利润率缺失"
+
+        asset_turnover = normalized_data.get('asset_turnover')
+        asset_turnover_formula = "资产周转率（文档披露/派生）" if asset_turnover is not None else "资产周转率缺失"
 
         level2_net_profit_margin = self._create_metric(
             "营业净利润率", net_profit_margin, 2,
-            "营业净利润率 = 净利润 / 营业收入", "资产净利率", "%"
+            net_profit_margin_formula, "资产净利率", "%"
         )
         level2_asset_turnover = self._create_metric(
             "资产周转率", asset_turnover, 2,
-            "资产周转率 = 营业收入 / 总资产", "资产净利率", "倍"
+            asset_turnover_formula, "资产净利率", "倍"
         )
         level2_total_assets = self._create_metric(
             "总资产", total_assets, 2,
@@ -842,30 +849,31 @@ class DupontAnalyzer:
             "股东权益", "权益乘数", "元"
         )
 
-        # 第一层：ROA和权益乘数
-        roa = (net_income / total_assets * 100) if total_assets > 0 else 0
-        equity_multiplier = (total_assets / shareholders_equity) if shareholders_equity > 0 else 0
+        # 第一层：ROA和权益乘数（仅使用文档披露或派生值，不自行计算）
+        roa = normalized_data.get('roa')
+        roa_formula = "总资产收益率（文档披露）" if roa is not None else "资产净利率缺失"
+
+        equity_multiplier = normalized_data.get('equity_multiplier')
+        equity_multiplier_formula = "权益乘数（文档披露/派生）" if equity_multiplier is not None else "权益乘数缺失"
 
         level1_roa = self._create_metric(
             "资产净利率", roa, 1,
-            "资产净利率 = 净利润 / 总资产", "净资产收益率", "%"
+            roa_formula, "净资产收益率", "%"
         )
         level1_equity_multiplier = self._create_metric(
             "权益乘数", equity_multiplier, 1,
-            "权益乘数 = 总资产 / 股东权益", "净资产收益率", "倍"
+            equity_multiplier_formula, "净资产收益率", "倍"
         )
 
-        # 顶层：ROE
-        # 优先使用提取到的加权平均净资产收益率（年报中直接披露的指标）
-        # 如果未提取到，则通过计算得到（净利润/股东权益）
+        # 顶层：ROE（仅使用年报披露值，不自行计算）
         if weighted_avg_roe is not None:
             roe = float(weighted_avg_roe)
             logger.info(f"✅ 使用年报中直接披露的加权平均净资产收益率: {roe}%")
             roe_formula = "ROE = 加权平均净资产收益率（年报披露）"
         else:
-            roe = (net_income / shareholders_equity * 100) if shareholders_equity > 0 else 0
-            logger.info(f"⚠️ 未提取到加权平均净资产收益率，通过计算得到ROE: {roe}% (净利润/股东权益)")
-            roe_formula = "ROE = 资产净利率 × 权益乘数 = 净利润 / 股东权益"
+            roe = None
+            logger.info("⚠️ 未提取到加权平均净资产收益率，ROE缺失")
+            roe_formula = "ROE缺失（未披露）"
 
         level1_roe = self._create_metric(
             "净资产收益率", roe, 1,
@@ -947,8 +955,11 @@ class DupontAnalyzer:
         for standard_name, possible_names in self.dupont_metric_mapping.items():
             for key, value in financial_data.items():
                 # 检查是否匹配任何可能的名称
-                if any(name.lower() in key.lower() or key.lower() in name.lower()
-                       for name in possible_names):
+                if any(name.lower() in key.lower() for name in possible_names):
+                    if value is None:
+                        normalized[standard_name] = None
+                        logger.info(f"标准化指标: {key} -> {standard_name} = None")
+                        break
                     normalized[standard_name] = float(value)
                     logger.info(f"标准化指标: {key} -> {standard_name} = {value}")
                     break
@@ -958,7 +969,7 @@ class DupontAnalyzer:
     def _create_metric(
         self,
         name: str,
-        value: float,
+        value: Optional[float],
         level: int,
         formula: str,
         parent: Optional[str] = None,
@@ -985,7 +996,9 @@ class DupontAnalyzer:
             from models.dupont_models import DupontMetric
 
         # 格式化显示值
-        if unit == "%":
+        if value is None:
+            formatted_value = "—"
+        elif unit == "%":
             formatted_value = f"{value:.2f}%"
         elif unit == "倍":
             formatted_value = f"{value:.2f}"
@@ -1002,7 +1015,7 @@ class DupontAnalyzer:
 
         return DupontMetric(
             name=name,
-            value=Decimal(str(value)),
+            value=None if value is None else Decimal(str(value)),
             formatted_value=formatted_value,
             level=level,
             formula=formula,
@@ -1090,7 +1103,7 @@ class DupontAnalyzer:
             value=level2.asset_turnover.value,
             formatted_value=level2.asset_turnover.formatted_value,
             level=2,
-            children=[revenue_node],
+            children=[],
             formula=level2.asset_turnover.formula
         )
 
@@ -1167,6 +1180,18 @@ class DupontAnalyzer:
         """
         insights = []
 
+        if any(
+            metric.value is None
+            for metric in [
+                level1.roe,
+                level1.roa,
+                level1.equity_multiplier,
+                level2.net_profit_margin,
+                level2.asset_turnover,
+            ]
+        ):
+            return ["关键指标缺失，无法生成完整洞察"]
+
         roe_value = float(level1.roe.value)
         roa_value = float(level1.roa.value)
         equity_multiplier_value = float(level1.equity_multiplier.value)
@@ -1235,6 +1260,18 @@ class DupontAnalyzer:
             'equity_multiplier': 2.0  # 2倍
         }
 
+        if any(
+            metric.value is None
+            for metric in [
+                level1.roe,
+                level1.roa,
+                level1.equity_multiplier,
+                level2.net_profit_margin,
+                level2.asset_turnover,
+            ]
+        ):
+            return strengths
+
         roe_value = float(level1.roe.value)
         roa_value = float(level1.roa.value)
         equity_multiplier_value = float(level1.equity_multiplier.value)
@@ -1280,6 +1317,18 @@ class DupontAnalyzer:
             'asset_turnover': 1.0,
             'equity_multiplier': 2.0
         }
+
+        if any(
+            metric.value is None
+            for metric in [
+                level1.roe,
+                level1.roa,
+                level1.equity_multiplier,
+                level2.net_profit_margin,
+                level2.asset_turnover,
+            ]
+        ):
+            return weaknesses
 
         roe_value = float(level1.roe.value)
         roa_value = float(level1.roa.value)

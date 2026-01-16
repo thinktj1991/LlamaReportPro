@@ -743,6 +743,20 @@ const App = {
     const goBackToMain = () => {
       currentPage.value = 'main'
     }
+
+    const stripDupontAssetsNodes = (analysis) => {
+      if (!analysis || !analysis.tree_structure) return
+
+      const stripNodes = (node) => {
+        if (!node || !Array.isArray(node.children)) return
+        node.children = node.children.filter(child => (
+          child?.id !== 'current_assets' && child?.id !== 'non_current_assets'
+        ))
+        node.children.forEach(stripNodes)
+      }
+
+      stripNodes(analysis.tree_structure)
+    }
     
     const handleDupontAnalysis = async () => {
       chatMessages.value.push({ 
@@ -802,6 +816,7 @@ const App = {
           // 保存杜邦分析数据，转换为组件需要的格式
           // 注意：杜邦分析按钮生成的视图只设置dupontData，不添加到visualizationCards
           const analysis = result.analysis
+          stripDupontAssetsNodes(analysis)
           const level1 = analysis.level1 || {}
           dupontData.value = {
             roe: level1.roe?.formatted_value || level1.roe?.value || '—',

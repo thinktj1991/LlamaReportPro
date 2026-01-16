@@ -4,7 +4,7 @@
 """
 
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import sys
 import re
 from pathlib import Path
@@ -118,7 +118,12 @@ async def extract_financial_data_for_dupont(
             f"{company_name} {year}年 资产负债表 总资产 资产总计",
             f"{company_name} {year}年 资产负债表 股东权益 所有者权益 归属于母公司所有者权益",
             f"{company_name} {year}年 资产负债表 流动资产 流动资产合计",
-            f"{company_name} {year}年 资产负债表 非流动资产 非流动资产合计"
+            f"{company_name} {year}年 资产负债表 非流动资产 非流动资产合计",
+            f"{company_name} {year}年 加权平均净资产收益率 ROE 净资产收益率",
+            f"{company_name} {year}年 总资产收益率 平均总资产收益率 总资产报酬率 ROA 资产净利率",
+            f"{company_name} {year}年 营业净利润率 净利率",
+            f"{company_name} {year}年 资产周转率 总资产周转率",
+            f"{company_name} {year}年 权益乘数"
         ]
         
         all_context = []
@@ -158,8 +163,9 @@ async def extract_financial_data_for_dupont(
             4. 股东权益（归属于母公司所有者权益）
             5. 流动资产
             6. 非流动资产
-            7. 营业利润（可选）
-            8. 总负债（可选）
+            7. 加权平均净资产收益率（ROE、净资产收益率，百分比）
+            8. 营业利润（可选）
+            9. 总负债（可选）
             
             请以JSON格式返回，键名使用中文，值为数字（单位：元）。
             例如：{{"净利润": 1000000000, "营业收入": 5000000000, ...}}
@@ -194,9 +200,13 @@ async def extract_financial_data_for_dupont(
 4. 股东权益（归属于母公司所有者权益、所有者权益合计）- 必填，单位：元
 5. 流动资产（流动资产合计）- 必填，单位：元
 6. 非流动资产（非流动资产合计）- 必填，单位：元
-7. 加权平均净资产收益率（ROE、净资产收益率）- 重要，单位：百分比（如10.08表示10.08%），这是年报中直接披露的指标，请优先提取
-8. 营业利润 - 可选，单位：元
-9. 总负债（负债合计）- 可选，单位：元
+            7. 加权平均净资产收益率（ROE、净资产收益率）- 重要，单位：百分比（如10.08表示10.08%），这是年报中直接披露的指标，请优先提取
+            8. 总资产收益率（平均总资产收益率/总资产报酬率/ROA/资产净利率）- 重要，单位：百分比
+            9. 营业净利润率（净利率）- 重要，单位：百分比
+            10. 资产周转率（总资产周转率）- 重要，单位：倍
+            11. 权益乘数 - 重要，单位：倍
+            12. 营业利润 - 可选，单位：元
+            13. 总负债（负债合计）- 可选，单位：元
 
 【数据来源】
 {context_text[:5000] if context_text else "请从所有已索引的文档中检索"}
@@ -293,8 +303,12 @@ async def extract_financial_data_for_dupont(
 5. 流动资产（流动资产合计）- 必填，单位：元
 6. 非流动资产（非流动资产合计）- 必填，单位：元
 7. 加权平均净资产收益率（ROE、净资产收益率）- 重要，单位：百分比（如10.08表示10.08%），这是年报中直接披露的指标，请优先提取
-8. 营业利润 - 可选，单位：元
-9. 总负债（负债合计）- 可选，单位：元
+8. 总资产收益率（平均总资产收益率/总资产报酬率/ROA/资产净利率）- 重要，单位：百分比
+9. 营业净利润率（净利率）- 重要，单位：百分比
+10. 资产周转率（总资产周转率）- 重要，单位：倍
+11. 权益乘数 - 重要，单位：倍
+12. 营业利润 - 可选，单位：元
+13. 总负债（负债合计）- 可选，单位：元
 
 【数据来源】
 {context_text[:5000] if context_text else "请从所有已索引的文档中检索"}
@@ -337,6 +351,32 @@ async def extract_financial_data_for_dupont(
             if table_data:
                 financial_data.update(table_data)
                 logger.info(f"从表格格式提取到 {len(table_data)} 个指标")
+
+        # 第四点五步：严格三步流程（检索→结构化→派生）
+        structured_metrics = _build_structured_metrics_json(
+            query_engine=query_engine,
+            context_text=context_text,
+            company_name=company_name,
+            year=year,
+            seed_data=financial_data
+        )
+        if structured_metrics.get("metrics"):
+            logger.info(f"结构化指标JSON: {structured_metrics}")
+            metric_map = {
+                "ROE": "加权平均净资产收益率",
+                "ROA": "总资产收益率",
+                "NetProfit": "净利润",
+                "Revenue": "营业收入",
+                "TotalAssets": "总资产",
+                "Equity": "股东权益",
+                "NetProfitMargin": "营业净利润率",
+                "AssetTurnover": "资产周转率",
+                "EquityMultiplier": "权益乘数"
+            }
+            for metric in structured_metrics["metrics"]:
+                target_key = metric_map.get(metric.get("metric"))
+                if target_key and metric.get("value") is not None:
+                    financial_data[target_key] = metric["value"]
         
         # 第五步：数据验证和补充
         financial_data = validate_and_complement_financial_data(financial_data, context_text)
@@ -472,6 +512,34 @@ def parse_financial_data_response_enhanced(response_text: str, context_text: str
                 r'净资产收益率[|\s]+([\d,\.]+%?)',
                 r'净资产收益率[：:]\s*([\d,\.]+%?)',
             ],
+            '总资产收益率': [
+                r'总资产收益率[|\s]+([\d,\.]+%?)',
+                r'总资产收益率[：:]\s*([\d,\.]+%?)',
+                r'平均总资产收益率[|\s]+([\d,\.]+%?)',
+                r'平均总资产收益率[：:]\s*([\d,\.]+%?)',
+                r'总资产报酬率[|\s]+([\d,\.]+%?)',
+                r'总资产报酬率[：:]\s*([\d,\.]+%?)',
+                r'ROA[|\s]+([\d,\.]+%?)',
+                r'ROA[：:]\s*([\d,\.]+%?)',
+                r'资产净利率[|\s]+([\d,\.]+%?)',
+                r'资产净利率[：:]\s*([\d,\.]+%?)',
+            ],
+            '营业净利润率': [
+                r'营业净利润率[|\s]+([\d,\.]+%?)',
+                r'营业净利润率[：:]\s*([\d,\.]+%?)',
+                r'净利率[|\s]+([\d,\.]+%?)',
+                r'净利率[：:]\s*([\d,\.]+%?)',
+            ],
+            '资产周转率': [
+                r'资产周转率[|\s]+([\d,\.]+)',
+                r'资产周转率[：:]\s*([\d,\.]+)',
+                r'总资产周转率[|\s]+([\d,\.]+)',
+                r'总资产周转率[：:]\s*([\d,\.]+)',
+            ],
+            '权益乘数': [
+                r'权益乘数[|\s]+([\d,\.]+)',
+                r'权益乘数[：:]\s*([\d,\.]+)',
+            ],
         }
         
         # 合并所有文本进行搜索
@@ -484,8 +552,8 @@ def parse_financial_data_response_enhanced(response_text: str, context_text: str
                 match = re.search(pattern, search_text, re.IGNORECASE)
                 if match:
                     value_str = match.group(1)
-                    # 特殊处理：加权平均净资产收益率是百分比，不需要单位转换
-                    if metric_name == '加权平均净资产收益率':
+                    # 百分比指标：ROE、ROA、净利润率等
+                    if metric_name in ('加权平均净资产收益率', '总资产收益率', '营业净利润率'):
                         # 移除百分号，直接转换为float
                         value_clean = value_str.replace('%', '').replace(',', '').strip()
                         try:
@@ -493,12 +561,12 @@ def parse_financial_data_response_enhanced(response_text: str, context_text: str
                             # 验证合理性（通常在0-100之间）
                             if 0 <= value_float <= 100:
                                 financial_data[metric_name] = value_float
-                                logger.info(f"✅ 从文本提取加权平均净资产收益率（ROE）: {value_float}%")
+                                logger.info(f"✅ 从文本提取{metric_name}: {value_float}%")
                                 break
                             else:
-                                logger.warning(f"⚠️ 加权平均净资产收益率值 {value_float} 超出合理范围，跳过")
+                                logger.warning(f"⚠️ {metric_name}值 {value_float} 超出合理范围，跳过")
                         except (ValueError, TypeError):
-                            logger.warning(f"⚠️ 无法解析加权平均净资产收益率值: {value_str}")
+                            logger.warning(f"⚠️ 无法解析{metric_name}值: {value_str}")
                     else:
                         value_clean = clean_numeric_string(value_str)
                         if value_clean and value_clean > 0:
@@ -544,6 +612,9 @@ def clean_numeric_string(value_str: str) -> Optional[float]:
         elif '千亿' in value_str or '千亿元' in value_str:
             multiplier = 100000000000
             value_str = value_str.replace('千亿', '').replace('千亿元', '')
+        elif '百万元' in value_str:
+            multiplier = 1000000
+            value_str = value_str.replace('百万元', '')
         elif '亿' in value_str or '亿元' in value_str:
             multiplier = 100000000
             value_str = value_str.replace('亿', '').replace('亿元', '')
@@ -579,7 +650,7 @@ def extract_from_table_format(text: str) -> Dict[str, float]:
     financial_data = {}
     
     # 表格行模式：指标名 | 数值
-    table_row_pattern = r'([^|\n]+)\s*\|\s*([\d,\.]+[万千百十亿]?元?)'
+    table_row_pattern = r'([^|\n]+)\s*\|\s*([\d,\.]+%?|[\d,\.]+[万千百十亿]?元?|[\d,\.]+倍|[\d,\.]+次)'
     matches = re.finditer(table_row_pattern, text)
     
     metric_keywords = {
@@ -590,6 +661,10 @@ def extract_from_table_format(text: str) -> Dict[str, float]:
         '流动资产': ['流动资产'],
         '非流动资产': ['非流动资产'],
         '加权平均净资产收益率': ['加权平均净资产收益率', 'ROE', '净资产收益率'],
+        '总资产收益率': ['总资产收益率', '平均总资产收益率', '总资产报酬率', 'ROA', '资产净利率'],
+        '营业净利润率': ['营业净利润率', '净利率'],
+        '资产周转率': ['资产周转率', '总资产周转率'],
+        '权益乘数': ['权益乘数'],
     }
     
     for match in matches:
@@ -598,14 +673,24 @@ def extract_from_table_format(text: str) -> Dict[str, float]:
         
         for key, keywords in metric_keywords.items():
             if any(kw in metric_name for kw in keywords):
-                # 特殊处理：加权平均净资产收益率是百分比
-                if key == '加权平均净资产收益率':
+                # 百分比指标
+                if key in ('加权平均净资产收益率', '总资产收益率', '营业净利润率'):
                     value_clean = value_str.replace('%', '').replace(',', '').strip()
                     try:
                         value_float = float(value_clean)
                         if 0 <= value_float <= 100 and key not in financial_data:
                             financial_data[key] = value_float
-                            logger.info(f"✅ 从表格提取加权平均净资产收益率（ROE）: {value_float}%")
+                            logger.info(f"✅ 从表格提取{key}: {value_float}%")
+                            break
+                    except (ValueError, TypeError):
+                        pass
+                elif key in ('资产周转率', '权益乘数'):
+                    value_clean = value_str.replace('倍', '').replace('次', '').replace(',', '').strip()
+                    try:
+                        value_float = float(value_clean)
+                        if value_float > 0 and key not in financial_data:
+                            financial_data[key] = value_float
+                            logger.info(f"✅ 从表格提取{key}: {value_float}")
                             break
                     except (ValueError, TypeError):
                         pass
@@ -616,6 +701,267 @@ def extract_from_table_format(text: str) -> Dict[str, float]:
                         break
     
     return financial_data
+
+
+def _extract_metric_from_text(
+    text: str,
+    aliases: List[str],
+    value_type: str
+) -> Tuple[Optional[float], Optional[str], Optional[str]]:
+    """
+    从文本中提取指定指标的数值、来源名称和单位
+
+    value_type: 'percent' | 'amount' | 'ratio'
+    """
+    if not text:
+        return None, None, None
+
+    import re
+
+    unit_pattern = r'(万亿|千亿|百万元|千万元|亿元|亿|万元|万|元|%|倍|次)?'
+    for alias in aliases:
+        pattern = rf'{re.escape(alias)}[^\d%]{{0,8}}([\d,\.]+)\s*{unit_pattern}'
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+
+        value_str = match.group(1)
+        unit = match.group(2) or None
+        try:
+            value_clean = value_str.replace(',', '').replace('，', '').strip()
+            value_num = float(value_clean)
+        except (ValueError, TypeError):
+            continue
+
+        # 排除年份
+        if 2000 <= abs(value_num) <= 2030:
+            continue
+
+        if value_type == 'percent':
+            # 优先识别百分比
+            if unit == '%' or (unit is None and 0 <= value_num <= 100):
+                return value_num, alias, '%'
+            continue
+
+        if value_type == 'ratio':
+            if unit in ('倍', '次') or unit is None:
+                return value_num, alias, 'times'
+            continue
+
+        # amount
+        if unit == '%':
+            continue
+        # 若未明确单位且数值过小，避免误匹配
+        if unit is None and value_num < 1_000_000:
+            continue
+        if unit is None:
+            return value_num, alias, '元'
+        # 明确单位则保留原始单位
+        return value_num, alias, unit
+
+    return None, None, None
+
+
+def _build_structured_metrics_json(
+    query_engine,
+    context_text: str,
+    company_name: str,
+    year: str,
+    seed_data: Optional[Dict[str, float]] = None
+) -> Dict[str, Any]:
+    """
+    按三步流程构建结构化指标JSON（不计算非规定指标）
+    """
+    metric_defs = [
+        {
+            "metric": "ROE",
+            "aliases": ["加权平均净资产收益率", "净资产收益率", "ROE"],
+            "type": "percent"
+        },
+        {
+            "metric": "ROA",
+            "aliases": ["平均总资产收益率", "总资产收益率", "总资产报酬率", "资产净利率", "ROA"],
+            "type": "percent"
+        },
+        {
+            "metric": "NetProfit",
+            "aliases": ["归属于母公司股东的净利润", "归属于本行股东的净利润", "归母净利润", "净利润"],
+            "type": "amount"
+        },
+        {
+            "metric": "Revenue",
+            "aliases": ["营业收入", "营业总收入"],
+            "type": "amount"
+        },
+        {
+            "metric": "TotalAssets",
+            "aliases": ["资产总额", "总资产", "资产总计", "资产合计"],
+            "type": "amount"
+        },
+        {
+            "metric": "Equity",
+            "aliases": ["股东权益", "所有者权益", "归属于母公司股东的权益", "归属于母公司所有者权益"],
+            "type": "amount"
+        }
+    ]
+
+    import json
+    import os
+
+    metrics = []
+    seed_data = seed_data or {}
+    year_value = None
+    try:
+        year_value = int(year)
+    except (ValueError, TypeError):
+        year_value = None
+
+    seed_key_map = {
+        "ROE": "加权平均净资产收益率",
+        "ROA": "总资产收益率",
+        "NetProfit": "净利润",
+        "Revenue": "营业收入",
+        "TotalAssets": "总资产",
+        "Equity": "股东权益"
+    }
+
+    for metric_def in metric_defs:
+        query_aliases = "、".join(metric_def["aliases"])
+        query = f"{company_name}{year}年 {query_aliases} 的披露数值是多少？请给出数值和单位"
+        response = query_engine.query(query)
+        response_text = str(response)
+        search_text = f"{response_text}\n{context_text}"
+        value, source, unit = _extract_metric_from_text(
+            search_text, metric_def["aliases"], metric_def["type"]
+        )
+        if value is None:
+            fallback_data = parse_financial_data_response_enhanced(response_text, context_text)
+            if metric_def["metric"] == "ROE":
+                value = fallback_data.get("加权平均净资产收益率")
+                unit = "%" if value is not None else unit
+                source = "加权平均净资产收益率" if value is not None else source
+            elif metric_def["metric"] == "ROA":
+                value = fallback_data.get("总资产收益率")
+                unit = "%" if value is not None else unit
+                source = "平均总资产收益率" if value is not None else source
+            elif metric_def["metric"] == "NetProfit":
+                value = fallback_data.get("净利润")
+                unit = "元" if value is not None else unit
+                source = "归属于母公司股东的净利润" if value is not None else source
+            elif metric_def["metric"] == "Revenue":
+                value = fallback_data.get("营业收入")
+                unit = "元" if value is not None else unit
+                source = "营业收入" if value is not None else source
+            elif metric_def["metric"] == "TotalAssets":
+                value = fallback_data.get("总资产")
+                unit = "元" if value is not None else unit
+                source = "资产总额" if value is not None else source
+            elif metric_def["metric"] == "Equity":
+                value = fallback_data.get("股东权益")
+                unit = "元" if value is not None else unit
+                source = "股东权益" if value is not None else source
+        if value is None:
+            seed_key = seed_key_map.get(metric_def["metric"])
+            if seed_key and seed_key in seed_data:
+                value = seed_data.get(seed_key)
+                source = metric_def["aliases"][0]
+                unit = "%" if metric_def["type"] == "percent" else "元"
+        if value is not None:
+            metrics.append({
+                "metric": metric_def["metric"],
+                "year": year_value,
+                "value": value,
+                "unit": unit,
+                "source": source or metric_def["aliases"][0],
+                "yoy": None
+            })
+
+    # 第二步：结构化JSON输出（仅披露指标）
+    print(json.dumps({"metrics": metrics}, ensure_ascii=False))
+
+    # 保存为JSON文件
+    try:
+        safe_company = re.sub(r'[^\w\u4e00-\u9fff\-]+', '_', company_name or 'unknown')
+        safe_year = re.sub(r'[^\d]+', '', str(year or ''))
+        filename = f"dupont_metrics_{safe_company}_{safe_year or 'unknown'}.json"
+        output_dir = Path(__file__).parent.parent / "storage"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / filename
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump({"metrics": metrics}, f, ensure_ascii=False, indent=2)
+        logger.info(f"结构化指标JSON已保存: {output_path}")
+    except Exception as e:
+        logger.warning(f"保存结构化指标JSON失败: {str(e)}")
+
+    def _to_yuan(value: Optional[float], unit: Optional[str]) -> Optional[float]:
+        if value is None:
+            return None
+        unit_map = {
+            "元": 1,
+            "万元": 1e4,
+            "万": 1e4,
+            "百万元": 1e6,
+            "千万元": 1e7,
+            "亿元": 1e8,
+            "亿": 1e8,
+            "千亿": 1e11,
+            "万亿": 1e12
+        }
+        multiplier = unit_map.get(unit or "元", 1)
+        return value * multiplier
+
+    # 第三步：缺失指标计算（只计算规定指标）
+    metric_map = {m["metric"]: m for m in metrics}
+    net_profit = _to_yuan(metric_map.get("NetProfit", {}).get("value"), metric_map.get("NetProfit", {}).get("unit"))
+    revenue = _to_yuan(metric_map.get("Revenue", {}).get("value"), metric_map.get("Revenue", {}).get("unit"))
+    roe = metric_map.get("ROE", {}).get("value")
+    roa = metric_map.get("ROA", {}).get("value")
+
+    # 净利率
+    if net_profit is not None and revenue:
+        metrics.append({
+            "metric": "NetProfitMargin",
+            "year": year_value,
+            "value": (net_profit / revenue) * 100,
+            "unit": "%",
+            "source": "净利润/营业收入",
+            "yoy": None,
+            "derived": True,
+            "formula": "净利率 = 净利润 / 营业收入"
+        })
+
+    # 权益乘数
+    if roe is not None and roa:
+        metrics.append({
+            "metric": "EquityMultiplier",
+            "year": year_value,
+            "value": roe / roa,
+            "unit": "times",
+            "source": "ROE/ROA",
+            "yoy": None,
+            "derived": True,
+            "formula": "权益乘数 = ROE / ROA"
+        })
+
+    # 资产周转率
+    net_profit_margin = None
+    for m in metrics:
+        if m.get("metric") == "NetProfitMargin":
+            net_profit_margin = m.get("value")
+            break
+    if roa is not None and net_profit_margin:
+        metrics.append({
+            "metric": "AssetTurnover",
+            "year": year_value,
+            "value": roa / net_profit_margin,
+            "unit": "times",
+            "source": "ROA/净利率",
+            "yoy": None,
+            "derived": True,
+            "formula": "资产周转率 = ROA / 净利率"
+        })
+
+    return {"metrics": metrics}
 
 
 def validate_and_complement_financial_data(

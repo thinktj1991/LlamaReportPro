@@ -22,6 +22,10 @@ class FinancialDataExtraction(BaseModel):
     营业利润: Optional[float] = Field(default=None, description="营业利润，单位：元（可选）")
     总负债: Optional[float] = Field(default=None, description="总负债（负债合计），单位：元（可选）")
     加权平均净资产收益率: Optional[float] = Field(default=None, description="加权平均净资产收益率（ROE），单位：百分比（如10.08表示10.08%），这是年报中直接披露的指标，优先使用")
+    总资产收益率: Optional[float] = Field(default=None, description="总资产收益率/总资产报酬率/ROA，单位：百分比（如1.23表示1.23%）")
+    营业净利润率: Optional[float] = Field(default=None, description="营业净利润率/净利率，单位：百分比（如5.20表示5.20%）")
+    资产周转率: Optional[float] = Field(default=None, description="资产周转率/总资产周转率，单位：倍（如0.85）")
+    权益乘数: Optional[float] = Field(default=None, description="权益乘数，单位：倍（如2.10）")
     
     @field_validator('*', mode='before')
     @classmethod
@@ -33,7 +37,7 @@ class FinancialDataExtraction(BaseModel):
             return float(v)
         if isinstance(v, str):
             # 移除单位并转换
-            v = v.replace(',', '').replace('元', '').strip()
+            v = v.replace(',', '').replace('元', '').replace('%', '').replace('倍', '').replace('次', '').strip()
             # 处理单位
             if '万亿' in v or '万亿元' in v:
                 multiplier = 1000000000000
@@ -65,7 +69,7 @@ class FinancialDataExtraction(BaseModel):
 class DupontMetric(BaseModel):
     """杜邦分析单个指标"""
     name: str = Field(description="指标名称，如'净资产收益率'、'资产净利率'")
-    value: Decimal = Field(description="指标值（小数形式），如0.1523表示15.23%")
+    value: Optional[Decimal] = Field(description="指标值（小数形式），如0.1523表示15.23%")
     formatted_value: str = Field(description="格式化显示值，如'15.23%'或'1.52'")
     level: int = Field(description="层级：1=顶层ROE, 2=二级分解, 3=三级分解, 4=底层数据", ge=1, le=4)
     formula: str = Field(description="计算公式，如'ROE = ROA × 权益乘数'")
@@ -77,7 +81,7 @@ class DupontMetric(BaseModel):
     def convert_to_decimal(cls, v):
         """自动转换为Decimal类型"""
         if v is None:
-            return Decimal('0')
+            return None
         if isinstance(v, (int, float)):
             return Decimal(str(v))
         if isinstance(v, str):
@@ -90,9 +94,11 @@ class DupontMetric(BaseModel):
     
     @field_validator('value')
     @classmethod
-    def validate_range(cls, v: Decimal) -> Decimal:
+    def validate_range(cls, v: Optional[Decimal]) -> Optional[Decimal]:
         """验证数值合理性（允许负值和大值）"""
         # 只做基本检查，不限制范围（因为某些指标可能很大）
+        if v is None:
+            return None
         if v < -1000 or v > 10000:
             # 只记录警告，不抛出异常
             import logging
@@ -150,7 +156,7 @@ class DupontTreeNode(BaseModel):
     """杜邦分析树状结构节点"""
     id: str = Field(description="节点ID")
     name: str = Field(description="节点名称")
-    value: Decimal = Field(description="节点值")
+    value: Optional[Decimal] = Field(description="节点值")
     formatted_value: str = Field(description="格式化值")
     level: int = Field(description="层级")
     children: List['DupontTreeNode'] = Field(default_factory=list, description="子节点列表")

@@ -15,6 +15,15 @@
               <span class="btn-text">财务点评</span>
             </button>
             <button 
+              class="quick-btn dupont-analysis" 
+              @click="handleQuickAnalysis('dupont_analysis')"
+              :disabled="loading"
+              title="生成杜邦分析"
+            >
+              <span class="btn-icon">📊</span>
+              <span class="btn-text">杜邦分析</span>
+            </button>
+            <button 
               class="quick-btn business-guidance" 
               @click="handleQuickAnalysis('business_guidance')"
               :disabled="loading"
@@ -40,15 +49,6 @@
             >
               <span class="btn-icon">📈</span>
               <span class="btn-text">盈利预测</span>
-            </button>
-            <button 
-              class="quick-btn dupont-analysis" 
-              @click="handleQuickAnalysis('dupont_analysis')"
-              :disabled="loading"
-              title="生成杜邦分析"
-            >
-              <span class="btn-icon">📊</span>
-              <span class="btn-text">杜邦分析</span>
             </button>
           </div>
         </div>
