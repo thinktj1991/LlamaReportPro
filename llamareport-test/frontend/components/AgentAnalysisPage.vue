@@ -158,6 +158,8 @@
                     </tbody>
                   </table>
                 </div>
+                <div v-if="viz.data?.type === 'financial_table' && (viz.data?.table?.insight_html || viz.data?.table?.insight)" class="table-insight" v-html="viz.data.table.insight_html || viz.data.table.insight">
+                </div>
                 <div v-else :id="'agent-viz-' + (viz.id || idx)" class="chart-container"></div>
                 
                 <!-- 推荐说明 -->

@@ -376,16 +376,123 @@ const App = {
       }
     }
 
+    const highlightInsightText = (text = '') => {
+      let result = String(text)
+      const metricKeywords = [
+        '资产总额', '负债总额', '发放贷款及垫款', '个人贷款', '企业贷款',
+        '投资类金融资产', '现金及存放央行款项', '存放同业款项',
+        '吸收存款', '个人存款', '企业存款', '向央行借款',
+        '同业负债', '已发行债务证券', '卖出回购金融资产',
+        '营业收入合计', '利息净收入', '非利息净收入', '手续费及佣金净收入',
+        '其他非利息净收入', '投资收益', '公允价值变动损益',
+        '营业支出合计', '业务及管理费', '信用及其他资产减值损失', '税金及附加',
+        '经营活动现金流', '投资活动现金流', '筹资活动现金流', '现金净变动额',
+        '净利润', '归母净利润', '资产负债率', 'ROE', 'ROA',
+        '营业收入', '营业利润', '利润总额', '毛利率', '净利率',
+        '总资产', '总负债', '股东权益', '流动资产', '流动负债',
+        '资产周转率', '权益乘数', '净资产收益率', '资产净利率',
+        '成本收入比', '净息差', '不良贷款率', '拨备覆盖率',
+        'EPS', '每股收益', '每股净资产', '分红率'
+      ]
+      metricKeywords.forEach((keyword) => {
+        result = result.replaceAll(keyword, `<span class="insight-key">${keyword}</span>`)
+      })
+      result = result.replace(/(-?\d{1,3}(?:,\d{3})*(?:\.\d+)?%?|-?\d+(?:\.\d+)?%?)(万亿元|亿元|万元|元)?/g, (match) => {
+        return `<span class="insight-num">${match}</span>`
+      })
+      result = result.replace(/(增长|上升|提升|扩大|改善|增加|上行|回升)/g, '<span class="insight-up">$1</span>')
+      result = result.replace(/(下降|下滑|收缩|减少|下行|走弱|压降|回落)/g, '<span class="insight-down">$1</span>')
+      return result
+    }
+
+    const formatSummaryList = (summary = '') => {
+      const lines = String(summary).split(/\n+/).map(line => line.trim()).filter(Boolean)
+      if (lines.length === 0) return summary
+      const items = lines.map((line) => {
+        const parts = line.split('：')
+        if (parts.length >= 2) {
+          const label = parts.shift()
+          const content = parts.join('：')
+          return `<li><span class="insight-label">${label}</span>：${highlightInsightText(content)}</li>`
+        }
+        return `<li>${highlightInsightText(line)}</li>`
+      })
+      return `<ul class="summary-list">${items.join('')}</ul>`
+    }
+
+    const formatFinancialReviewSummary = (summary = '') => {
+      const text = String(summary).replace(/\n+/g, ' ').trim()
+      if (!text) return ''
+      const labelRegex = /(资产负债表(?:数据)?|利润表(?:数据)?|现金流量表(?:数据)?|综合判断|总体判断|总体评价|综合评价)[：:\s]*/g
+      const matches = Array.from(text.matchAll(labelRegex))
+      if (matches.length === 0) {
+        return formatSummaryList(summary)
+      }
+      
+      const sections = {}
+      const normalizeLabel = (label = '') => {
+        if (label.includes('资产负债表')) return '资产负债表'
+        if (label.includes('利润表')) return '利润表'
+        if (label.includes('现金流量表')) return '现金流量表'
+        return '综合判断'
+      }
+      
+      matches.forEach((match, idx) => {
+        const rawLabel = match[1] || ''
+        const start = (match.index || 0) + match[0].length
+        const end = idx + 1 < matches.length ? (matches[idx + 1].index || text.length) : text.length
+        const content = text.slice(start, end).trim()
+        const label = normalizeLabel(rawLabel)
+        if (content) {
+          sections[label] = content
+        }
+      })
+      
+      const orderedLabels = ['资产负债表', '利润表', '现金流量表', '综合判断']
+      const items = orderedLabels
+        .filter(label => sections[label])
+        .map(label => (
+          `<div class="summary-item"><span class="summary-label">${label}</span><div class="summary-text">${highlightInsightText(sections[label])}</div></div>`
+        ))
+      
+      if (items.length === 0) {
+        return formatSummaryList(summary)
+      }
+      
+      return `<div class="summary-block">${items.join('')}</div>`
+    }
+
+    const formatTableInsight = (insight = '') => {
+      const text = String(insight)
+      if (!text) return ''
+      const parts = text.split('：')
+      if (parts.length >= 2) {
+        const label = parts.shift()
+        const content = parts.join('：')
+        return `<span class="insight-label">${label}</span>：${highlightInsightText(content)}`
+      }
+      return highlightInsightText(text)
+    }
+
     const handleQuickAnalysis = async ({ sectionName, companyName, year, question, typeName }) => {
-      if (!sectionName || !companyName || !year) {
-        showMessage('error', '缺少公司名称或年份，无法生成快捷分析')
+      if (!sectionName) {
+        showMessage('error', '缺少分析类型，无法生成快捷分析')
         return
+      }
+      
+      // 如果缺少公司/年份，回退到 Agent 查询，保证按钮可用
+      if (!companyName || !year) {
+        const fallbackQuestion = question || `请生成${typeName || '财务点评'}分析`
+        return await handleAgentQuery(fallbackQuestion)
       }
       
       chatMessages.value.push({ type: 'user', content: question, timestamp: new Date() })
       queryLoading.value = true
       
       try {
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000) // 10分钟超时
+        
         const response = await fetch('/agent/generate-section', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -393,8 +500,11 @@ const App = {
             section_name: sectionName,
             company_name: companyName,
             year
-          })
+          }),
+          signal: controller.signal
         })
+        
+        clearTimeout(timeoutId)
         
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({ detail: '请求失败' }))
@@ -442,8 +552,14 @@ const App = {
               : (structured.financial_review || structured.financialReview || null)
             const summary = financialReview?.summary
             const tables = financialReview?.visualization_tables
+            const toolSummary = result.tool_calls?.find(tc => tc.tool_name === 'generate_financial_review')
+              ?.tool_output?.summary
             
-            answerText = summary || '未生成财务点评总结'
+            if (summary) {
+              answerText = formatFinancialReviewSummary(summary)
+            } else if (toolSummary) {
+              answerText = formatFinancialReviewSummary(toolSummary)
+            }
             
             if (tables) {
               const tableList = [
@@ -455,6 +571,10 @@ const App = {
               ].filter(Boolean)
               
               tableList.forEach((table, idx) => {
+                const normalizedTable = {
+                  ...table,
+                  insight_html: formatTableInsight(table.insight)
+                }
                 visualizationCards.value.push({
                   id: `${Date.now().toString()}-${idx}`,
                   question: formatTableTitle(table.title),
@@ -462,7 +582,7 @@ const App = {
                   data: {
                     has_visualization: true,
                     type: 'financial_table',
-                    table
+                    table: normalizedTable
                   },
                   type: 'financial_table'
                 })
@@ -474,6 +594,10 @@ const App = {
             visualization.tables
               .filter(table => table)
               .forEach((table, idx) => {
+                const normalizedTable = {
+                  ...table,
+                  insight_html: formatTableInsight(table.insight)
+                }
                 visualizationCards.value.push({
                   id: `${Date.now().toString()}-${idx}`,
                   question: formatTableTitle(table.title),
@@ -481,7 +605,7 @@ const App = {
                   data: {
                     has_visualization: true,
                     type: 'financial_table',
-                    table
+                    table: normalizedTable
                   },
                   type: 'financial_table'
                 })
@@ -496,16 +620,28 @@ const App = {
             })
           }
           
+          const answerHeader = `<div class="summary-title">以下是${typeName || sectionName}：</div>`
           if (answerText) {
             chatMessages.value.push({
               type: 'assistant',
-              content: answerText,
+              content: `${answerHeader}${answerText}`,
+              timestamp: new Date()
+            })
+          } else {
+            chatMessages.value.push({
+              type: 'assistant',
+              content: answerHeader,
               timestamp: new Date()
             })
           }
         }
       } catch (error) {
-        const errorMsg = error.message || '网络错误或请求超时'
+        let errorMsg = '网络错误或请求超时'
+        if (error.name === 'AbortError') {
+          errorMsg = '请求超时（超过10分钟），请稍后重试'
+        } else if (error.message) {
+          errorMsg = error.message
+        }
         chatMessages.value.push({
           type: 'assistant',
           content: `❌ ${typeName || sectionName}生成失败: ${errorMsg}`,
@@ -894,7 +1030,7 @@ const App = {
       dupontData, dupontLoading, visualizationData, visualizationLoading, visualizationCards, processStatus, suggestions,
       quickOverviewData,
       showMessage, handleFileSelected, handleFileUploaded, handleFileDeleted, handleFileProcess, handleFileProcessMultiple,
-      handleSendMessage, handleAgentQuery, executeAgentQuery, handleDupontAnalysis, handleGetSuggestions,
+      handleSendMessage, handleAgentQuery, executeAgentQuery, handleDupontAnalysis, handleGetSuggestions, handleQuickAnalysis,
       handleGenerateReport, handleGenerateSection, handleClearChat, checkIndexStatus, loadQuickOverview,
       handleDeleteMessage, goToAgentAnalysis, goBackToMain,
       handleRemoveVizCard: (cardId) => {

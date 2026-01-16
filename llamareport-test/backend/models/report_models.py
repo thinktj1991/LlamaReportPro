@@ -100,6 +100,7 @@ class FinancialStatementTable(BaseModel):
     title: str = Field(description="表格标题")
     headers: List[str] = Field(description="表头")
     rows: List[List[str]] = Field(description="表格行数据")
+    insight: str = Field(description="表格洞察结论")
 
 
 class FinancialStatementTables(BaseModel):

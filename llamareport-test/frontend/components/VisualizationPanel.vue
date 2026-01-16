@@ -165,6 +165,8 @@
                     </tbody>
                   </table>
                 </div>
+                <div v-if="card.type === 'financial_table' && card.data.table && (card.data.table.insight_html || card.data.table.insight)" class="table-insight" v-html="card.data.table.insight_html || card.data.table.insight">
+                </div>
                 <!-- Timeline时间轴（纵向布局，紧凑型） -->
                 <div v-else-if="card.data.visualization_type === 'timeline' && card.data.timeline_data" 
                      class="timeline-container">
@@ -208,13 +210,11 @@
                     class="insight-item"
                   >
                     <h4>
-                      {{ getInsightIcon(insight.insight_type) }} 
-                      {{ insight.description }}
+                      <span class="insight-icon">{{ getInsightIcon(insight.insight_type) }}</span>
+                      <span v-html="formatInsightText(insight.description)"></span>
                     </h4>
                     <ul v-if="insight.key_findings && insight.key_findings.length > 0">
-                      <li v-for="(finding, idx) in insight.key_findings" :key="idx">
-                        {{ finding }}
-                      </li>
+                      <li v-for="(finding, idx) in insight.key_findings" :key="idx" v-html="formatInsightText(finding)"></li>
                     </ul>
                   </div>
                 </div>
@@ -250,13 +250,11 @@
                   class="insight-item"
                 >
                   <h4>
-                    {{ getInsightIcon(insight.insight_type) }} 
-                    {{ insight.description }}
+                    <span class="insight-icon">{{ getInsightIcon(insight.insight_type) }}</span>
+                    <span v-html="formatInsightText(insight.description)"></span>
                   </h4>
                   <ul v-if="insight.key_findings && insight.key_findings.length > 0">
-                    <li v-for="(finding, idx) in insight.key_findings" :key="idx">
-                      {{ finding }}
-                    </li>
+                    <li v-for="(finding, idx) in insight.key_findings" :key="idx" v-html="formatInsightText(finding)"></li>
                   </ul>
                 </div>
               </div>
@@ -786,6 +784,38 @@ export default {
       }
       // 返回推荐的图表类型
       return cardData?.recommendation?.recommended_chart_type || 'bar';
+    },
+    highlightInsightText(text = '') {
+      let result = String(text)
+      const metricKeywords = [
+        '资产总额', '负债总额', '发放贷款及垫款', '个人贷款', '企业贷款',
+        '投资类金融资产', '现金及存放央行款项', '存放同业款项',
+        '吸收存款', '个人存款', '企业存款', '向央行借款',
+        '同业负债', '已发行债务证券', '卖出回购金融资产',
+        '营业收入合计', '利息净收入', '非利息净收入', '手续费及佣金净收入',
+        '其他非利息净收入', '投资收益', '公允价值变动损益',
+        '营业支出合计', '业务及管理费', '信用及其他资产减值损失', '税金及附加',
+        '经营活动现金流', '投资活动现金流', '筹资活动现金流', '现金净变动额',
+        '净利润', '归母净利润', '资产负债率', 'ROE', 'ROA',
+        '营业收入', '营业利润', '利润总额', '毛利率', '净利率',
+        '总资产', '总负债', '股东权益', '流动资产', '流动负债',
+        '资产周转率', '权益乘数', '净资产收益率', '资产净利率',
+        '成本收入比', '净息差', '不良贷款率', '拨备覆盖率',
+        'EPS', '每股收益', '每股净资产', '分红率'
+      ]
+      metricKeywords.forEach((keyword) => {
+        result = result.replaceAll(keyword, `<span class="insight-key">${keyword}</span>`)
+      })
+      result = result.replace(/(-?\d{1,3}(?:,\d{3})*(?:\.\d+)?%?|-?\d+(?:\.\d+)?%?)(万亿元|亿元|万元|元)?/g, (match) => {
+        return `<span class="insight-num">${match}</span>`
+      })
+      result = result.replace(/(增长|上升|提升|扩大|改善|增加|上行|回升)/g, '<span class="insight-up">$1</span>')
+      result = result.replace(/(下降|下滑|收缩|减少|下行|走弱|压降|回落)/g, '<span class="insight-down">$1</span>')
+      return result
+    },
+    formatInsightText(text = '') {
+      if (!text) return ''
+      return this.highlightInsightText(text).replace(/\n/g, '<br>')
     },
     formatAnalysisText(text) {
       if (!text) return '';

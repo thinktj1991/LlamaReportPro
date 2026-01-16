@@ -1929,6 +1929,115 @@ body {
     min-width: 120px;
 }
 
+.table-insight {
+    font-size: 0.7rem;
+    line-height: 1.4;
+    color: #334155;
+    margin-top: 8px;
+    padding: 6px 8px;
+    background: rgba(148, 163, 184, 0.12);
+    border-radius: 6px;
+    word-break: keep-all;
+    white-space: normal;
+}
+
+.insight-list {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.insight-list li {
+    margin: 4px 0;
+}
+
+.insight-label {
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.insight-key {
+    font-weight: 600;
+    color: #2563eb;
+    background: rgba(37, 99, 235, 0.12);
+    padding: 0 4px;
+    border-radius: 4px;
+}
+
+.insight-num {
+    font-weight: 700;
+    color: #7c3aed;
+    background: rgba(124, 58, 237, 0.12);
+    padding: 0 4px;
+    border-radius: 4px;
+}
+
+.insight-up {
+    font-weight: 700;
+    color: #dc2626;
+    background: rgba(220, 38, 38, 0.12);
+    padding: 0 4px;
+    border-radius: 4px;
+}
+
+.insight-down {
+    font-weight: 700;
+    color: #16a34a;
+    background: rgba(22, 163, 74, 0.12);
+    padding: 0 4px;
+    border-radius: 4px;
+}
+
+.summary-list {
+    margin: 0;
+    padding-left: 16px;
+}
+
+.summary-list li {
+    margin: 6px 0;
+    padding: 3px 6px;
+    border-radius: 6px;
+    background: rgba(248, 250, 252, 0.9);
+    border: 1px solid rgba(226, 232, 240, 0.7);
+    line-height: 1.35;
+}
+
+.summary-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 6px 0;
+}
+
+.summary-item {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-left: 4px solid #4facfe;
+    padding: 6px 8px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.summary-label {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #0f172a;
+    margin-bottom: 2px;
+}
+
+.summary-text {
+    font-size: 0.76rem;
+    line-height: 1.35;
+    color: #334155;
+}
+
+.summary-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #1f2937;
+    margin: 2px 0 6px;
+}
+
 .chart-header-inline {
     display: flex;
     align-items: center;
