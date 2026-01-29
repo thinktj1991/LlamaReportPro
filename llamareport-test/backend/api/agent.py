@@ -4,6 +4,7 @@ Agent API 接口
 """
 
 from typing import Dict, Any, Optional
+import re
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -13,6 +14,7 @@ from pathlib import Path
 
 from core.rag_engine import RAGEngine
 from agents.report_agent import ReportAgent
+from agents.visualization_agent import generate_visualization_for_query
 from agents.template_renderer import TemplateRenderer
 from models.report_models import ReportGenerationStatus
 
@@ -126,6 +128,15 @@ class GenerateSectionRequest(BaseModel):
 class AgentQueryRequest(BaseModel):
     """Agent 查询请求"""
     question: str = Field(description="用户问题")
+
+
+class VisualizationFromTextRequest(BaseModel):
+    """基于文本生成可视化的请求"""
+    query: str = Field(description="用户查询或标题")
+    answer: str = Field(description="业务亮点文本内容")
+    data: Optional[Dict[str, Any]] = Field(default=None, description="可选原始数据")
+    sources: Optional[list] = Field(default=None, description="可选数据来源")
+    max_views: int = Field(default=3, description="最多生成视图数量")
 
 
 # ==================== API 端点 ====================
@@ -310,6 +321,140 @@ async def agent_query(request: AgentQueryRequest):
                 "status": "error",
                 "error": str(e),
                 "question": request.question
+            }
+        )
+
+
+@router.post("/visualize-text")
+async def visualize_text(request: VisualizationFromTextRequest):
+    """
+    基于文本内容生成可视化（不触发RAG检索）
+    """
+    try:
+        if not request.answer or not request.answer.strip():
+            raise HTTPException(status_code=400, detail="文本内容为空，无法生成可视化")
+        def clean_title(raw_title: Optional[str]) -> Optional[str]:
+            if not raw_title:
+                return None
+            title = re.sub(r'^[#\s]+', '', raw_title)
+            title = re.sub(r'^[一二三四五六七八九十]+[、.]\s*', '', title)
+            title = re.sub(r'^\d+\.\s*', '', title)
+            title = title.replace('【', '').replace('】', '').strip()
+            title = re.sub(r'[`*_]+', '', title)
+            title = title.strip('|').strip()
+            return title or None
+
+        def build_query_hint(title: Optional[str], content: str) -> str:
+            text = f"{title or ''} {content}"
+            hint_parts = []
+            if re.search(r'风险|不确定|压力|隐患', text):
+                hint_parts.append("风险与不确定性")
+            if re.search(r'结构|组成|分布|占比|业务结构', text):
+                hint_parts.append("结构描述")
+            if re.search(r'过程|阶段|推进|演进|时间|里程碑|事件', text):
+                hint_parts.append("过程与变化 时间轴")
+            if re.search(r'总结|结论|判断|整体|主线', text):
+                hint_parts.append("核心结论")
+            if re.search(r'展望|态度|信心|谨慎|乐观', text):
+                hint_parts.append("态度与语气")
+            if re.search(r'同比|较去年|趋势|变化|增长|下降', text):
+                hint_parts.append("数据类 趋势 对比")
+            return " ".join(hint_parts[:2])
+
+        def split_sections(text: str) -> list:
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
+            if not lines:
+                return []
+            sections = []
+            current_title = None
+            current_lines = []
+            title_pattern = re.compile(r'^(#{1,6}\s+|[一二三四五六七八九十]+[、.]\s*|【.+】)')
+            for line in lines:
+                if title_pattern.match(line):
+                    if current_lines:
+                        sections.append((current_title, "\n".join(current_lines)))
+                    current_title = line
+                    current_lines = []
+                else:
+                    current_lines.append(line)
+            if current_lines:
+                sections.append((current_title, "\n".join(current_lines)))
+            return sections
+
+        def fallback_sections(text: str, limit: int) -> list:
+            paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+            if len(paragraphs) >= 2:
+                return [(None, p) for p in paragraphs[:limit]]
+            # 最后兜底：按句号拆分
+            sentences = [s.strip() for s in re.split(r'[。！？]', text) if s.strip()]
+            chunks = []
+            buffer = []
+            for sentence in sentences:
+                buffer.append(sentence)
+                if len("".join(buffer)) > 200:
+                    chunks.append("。".join(buffer))
+                    buffer = []
+                if len(chunks) >= limit:
+                    break
+            if buffer and len(chunks) < limit:
+                chunks.append("。".join(buffer))
+            return [(None, chunk) for chunk in chunks if chunk]
+
+        max_views = max(1, min(request.max_views, 6))
+        sections = split_sections(request.answer)
+        if not sections or len(sections) <= 1:
+            sections = fallback_sections(request.answer, max_views)
+
+        visualizations = []
+        for title, content in sections:
+            if len(visualizations) >= max_views:
+                break
+            if not content or len(content) < 40:
+                continue
+            query = request.query
+            display_title = clean_title(title)
+            hint = build_query_hint(display_title, content)
+            if hint:
+                query = f"{query} {hint}"
+            if display_title:
+                query = f"{query} - {display_title}"
+            viz_result = await generate_visualization_for_query(
+                query=query,
+                answer=content,
+                data=request.data,
+                sources=request.sources
+            )
+            if viz_result and viz_result.get("has_visualization"):
+                viz_result["source_title"] = title
+                viz_result["display_title"] = display_title
+                visualizations.append(viz_result)
+
+        if not visualizations:
+            viz_result = await generate_visualization_for_query(
+                query=request.query,
+                answer=request.answer,
+                data=request.data,
+                sources=request.sources
+            )
+            viz_result = _clean_decimal_types(viz_result)
+            return JSONResponse(content=viz_result)
+
+        payload = {
+            "has_visualization": True,
+            "visualizations": visualizations
+        }
+        payload = _clean_decimal_types(payload)
+        return JSONResponse(content=payload)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 文本可视化生成失败: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "has_visualization": False,
+                "error": str(e)
             }
         )
 

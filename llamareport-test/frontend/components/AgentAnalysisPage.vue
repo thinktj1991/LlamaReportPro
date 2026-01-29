@@ -123,24 +123,24 @@
         </div>
 
         <!-- 可视化图表区域 -->
-        <div v-if="visualizations.length > 0" class="visualizations-section">
+        <div v-if="filteredVisualizations.length > 0" class="visualizations-section">
           <div class="section-header">
             <span class="section-icon">📊</span>
             <h2>数据可视化</h2>
-            <span class="section-count">{{ visualizations.length }}</span>
+            <span class="section-count">{{ filteredVisualizations.length }}</span>
           </div>
           <div class="visualizations-grid">
             <div 
-              v-for="(viz, idx) in visualizations" 
+              v-for="(viz, idx) in filteredVisualizations" 
               :key="viz.id || idx"
               class="visualization-card"
             >
               <div class="viz-card-header">
                 <h4>{{ viz.question || '数据图表' }}</h4>
-                <button class="viz-close-btn" @click="removeVisualization(idx)" title="删除">×</button>
+                <button class="viz-close-btn" @click="removeVisualization(viz)" title="删除">×</button>
               </div>
               <div class="viz-card-content">
-                <div v-if="viz.data?.type === 'financial_table' && viz.data?.table" class="table-container">
+                <div v-if="viz.data?.type === 'financial_table' && viz.data?.table" class="table-container" :class="{ 'table-container--auto': isKeyMetricsTable(viz.data.table) }">
                   <table class="financial-table">
                     <thead>
                       <tr>
@@ -159,6 +159,25 @@
                   </table>
                 </div>
                 <div v-if="viz.data?.type === 'financial_table' && (viz.data?.table?.insight_html || viz.data?.table?.insight)" class="table-insight" v-html="viz.data.table.insight_html || viz.data.table.insight">
+                </div>
+                <div v-if="viz.data?.type === 'financial_table' && viz.data?.summary" class="table-insight">
+                  {{ viz.data.summary }}
+                </div>
+                <div v-if="viz.data?.type === 'insight_card'" class="insight-card">
+                  <div class="insight-card-title">{{ viz.data.title || '业务亮点洞察' }}</div>
+                  <div v-if="viz.data.headline" class="insight-card-headline">{{ viz.data.headline }}</div>
+                  <div v-if="viz.data.contribution" class="insight-card-row">
+                    <span class="insight-label">贡献：</span>{{ viz.data.contribution }}
+                  </div>
+                  <div v-if="viz.data.drivers && viz.data.drivers.length" class="insight-card-row">
+                    <span class="insight-label">驱动：</span>{{ viz.data.drivers.join('；') }}
+                  </div>
+                  <div v-if="viz.data.strategy_link && viz.data.strategy_link.length" class="insight-card-row">
+                    <span class="insight-label">策略：</span>{{ viz.data.strategy_link.join('；') }}
+                  </div>
+                  <div v-if="viz.data.risks_and_watchlist && viz.data.risks_and_watchlist.length" class="insight-card-row">
+                    <span class="insight-label">风险：</span>{{ viz.data.risks_and_watchlist.join('；') }}
+                  </div>
                 </div>
                 <div v-else :id="'agent-viz-' + (viz.id || idx)" class="chart-container"></div>
                 
@@ -224,7 +243,19 @@
                 <span class="data-icon">🎯</span>
                 <h3>业绩指引</h3>
               </div>
-              <div class="data-card-content" v-html="parseMarkdown(structuredData.businessGuidance)"></div>
+              <div class="data-card-content">
+                <div v-if="isBusinessGuidanceObject(structuredData.businessGuidance)" class="summary-block">
+                  <div
+                    v-for="(section, idx) in buildBusinessGuidanceSections(structuredData.businessGuidance)"
+                    :key="idx"
+                    class="summary-item"
+                  >
+                    <span class="summary-label">{{ section.title }}</span>
+                    <div class="summary-text">{{ formatGuidanceSectionContent(section.content) }}</div>
+                  </div>
+                </div>
+                <div v-else v-html="parseMarkdown(structuredData.businessGuidance)"></div>
+              </div>
             </div>
 
             <!-- 杜邦分析 -->
@@ -332,11 +363,464 @@ export default {
              this.structuredData.businessHighlights || 
              this.structuredData.businessGuidance || 
              this.structuredData.dupontAnalysis
+    },
+    filteredVisualizations() {
+      return this.visualizations.filter(viz => !this.isHiddenBusinessMetricTable(viz))
     }
   },
   methods: {
     goBack() {
       this.onBack()
+    },
+    isBusinessGuidanceObject(data) {
+      return data && typeof data === 'object' && !Array.isArray(data)
+    },
+    buildBusinessGuidanceSections(data) {
+      if (!this.isBusinessGuidanceObject(data)) return []
+      const guidancePeriod = data.guidance_period || data.guidancePeriod
+      const expectedPerformance = data.expected_performance || data.expectedPerformance
+      const keyMetrics = data.key_metrics || data.keyMetrics || []
+      const parentProfit = data.parent_net_profit_range || data.parentNetProfitRange
+      const parentProfitGrowth = data.parent_net_profit_growth_range || data.parentNetProfitGrowthRange
+      const nonRecurringProfit = data.non_recurring_profit_range || data.nonRecurringProfitRange
+      const epsRange = data.eps_range || data.epsRange
+      const revenueRange = data.revenue_range || data.revenueRange
+      const businessGuidance = data.business_specific_guidance || data.businessSpecificGuidance || []
+      const riskWarnings = data.risk_warnings || data.riskWarnings || []
+
+      const whatParts = []
+      if (guidancePeriod) whatParts.push(`期间：${guidancePeriod}`)
+      if (expectedPerformance) whatParts.push(expectedPerformance)
+      const whatText = whatParts.length ? whatParts.join('；') : '未明确'
+
+      const metricParts = []
+      if (parentProfit) metricParts.push(`归母净利润：${parentProfit}`)
+      if (parentProfitGrowth) metricParts.push(`归母净利润增长率：${parentProfitGrowth}`)
+      if (nonRecurringProfit) metricParts.push(`扣非净利润：${nonRecurringProfit}`)
+      if (epsRange) metricParts.push(`基本每股收益：${epsRange}`)
+      if (revenueRange) metricParts.push(`营业收入：${revenueRange}`)
+      const watchList = metricParts.length ? metricParts : (Array.isArray(keyMetrics) ? keyMetrics : [])
+      const watchContent = watchList.length ? watchList : '年报未明确量化口径'
+
+      const howContent = businessGuidance.length ? businessGuidance : '未明确'
+      const riskContent = riskWarnings.length ? riskWarnings : '未明确'
+
+      return [
+        { title: '① 经营目标方向', content: whatText },
+        { title: '② 核心指标锚点', content: watchContent },
+        { title: '③ 关键执行路径', content: howContent },
+        { title: '④ 不确定性与边界', content: riskContent }
+      ]
+    },
+    formatGuidanceSectionContent(content) {
+      if (Array.isArray(content)) {
+        return content.join('；')
+      }
+      return content || '—'
+    },
+    parseMetricValue(value) {
+      if (value === null || value === undefined) return null
+      if (typeof value === 'number') return value
+      const text = String(value).replace(/,/g, '').trim()
+      if (!text || text === '/' || text === '-') return null
+      const percent = text.includes('%')
+      const match = text.match(/-?\d+(\.\d+)?/)
+      if (!match) return null
+      let num = Number(match[0])
+      if (Number.isNaN(num)) return null
+      if (text.includes('万亿')) num *= 1e12
+      else if (text.includes('亿')) num *= 1e8
+      else if (text.includes('万')) num *= 1e4
+      if (percent) return num
+      return num
+    },
+    isKeyMetricsTable(table) {
+      const title = table?.title || ''
+      return String(title).includes('关键业务指标')
+    },
+    isHiddenBusinessMetricTable(viz) {
+      if (!viz || viz.data?.type !== 'financial_table') return false
+      const title = viz.data?.table?.title || viz.question || ''
+      const hiddenTitles = ['零售银行业务指标', '对公银行业务指标', '同业与资金业务指标']
+      return hiddenTitles.some(item => String(title).includes(item))
+    },
+    appendBusinessHighlightsTables(toolOutput) {
+      if (!toolOutput || typeof toolOutput !== 'object') return
+      const segmentTables = Array.isArray(toolOutput.segment_tables) ? toolOutput.segment_tables : []
+      const performanceReport = toolOutput.business_performance_report || toolOutput.businessPerformanceReport || {}
+      const segmentInsights = Array.isArray(performanceReport.segment_insights)
+        ? performanceReport.segment_insights
+        : []
+
+      const insightMap = new Map()
+      segmentInsights.forEach(insight => {
+        if (!insight || !insight.segment_id) return
+        insightMap.set(insight.segment_id, insight)
+      })
+
+      const buildInsightSummary = (insight) => {
+        if (!insight) return ''
+        const parts = []
+        if (insight.headline) parts.push(insight.headline)
+        if (Array.isArray(insight.drivers) && insight.drivers.length > 0) {
+          parts.push(`驱动：${insight.drivers.slice(0, 2).join('；')}`)
+        }
+        if (Array.isArray(insight.strategy_link) && insight.strategy_link.length > 0) {
+          parts.push(`策略：${insight.strategy_link.slice(0, 2).join('；')}`)
+        }
+        if (Array.isArray(insight.risks_and_watchlist) && insight.risks_and_watchlist.length > 0) {
+          parts.push(`风险：${insight.risks_and_watchlist.slice(0, 2).join('；')}`)
+        }
+        return parts.join(' | ')
+      }
+
+      segmentTables.forEach((segment, idx) => {
+        const segmentId = segment.segment_id || `segment-${idx}`
+        const vizId = `biz-table-${segmentId}`
+        const exists = this.visualizations.some(viz => viz.id === vizId)
+        if (exists) return
+
+        const insight = insightMap.get(segmentId)
+        const reportSummary = buildInsightSummary(insight)
+        const tableSummary = segment.conclusion || segment.table?.insight || ''
+        const summary = reportSummary || tableSummary
+
+        if (segment.table && summary && !segment.table.insight) {
+          segment.table.insight = summary
+        }
+
+        this.visualizations.push({
+          id: vizId,
+          question: `${segment.segment_name || segmentId}指标`,
+          source: 'business_highlights',
+          data: {
+            has_visualization: true,
+            type: 'financial_table',
+            table: segment.table,
+            summary
+          }
+        })
+      })
+    },
+    appendBusinessHighlightsInsights(toolOutput) {
+      if (!toolOutput || typeof toolOutput !== 'object') return
+      const performanceReport = toolOutput.business_performance_report || toolOutput.businessPerformanceReport || {}
+      const segmentInsights = Array.isArray(performanceReport.segment_insights)
+        ? performanceReport.segment_insights
+        : []
+      if (!segmentInsights.length) return
+
+      segmentInsights.forEach((insight, idx) => {
+        if (!insight) return
+        const segmentId = insight.segment_id || `segment-${idx}`
+        const vizId = `biz-insight-${segmentId}`
+        const exists = this.visualizations.some(viz => viz.id === vizId)
+        if (exists) return
+
+        this.visualizations.push({
+          id: vizId,
+          question: `${insight.segment_name || segmentId}洞察`,
+          source: 'business_highlights',
+          data: {
+            has_visualization: true,
+            type: 'insight_card',
+            title: insight.segment_name || segmentId,
+            headline: insight.headline || '',
+            contribution: Array.isArray(insight.contribution) ? insight.contribution.join('；') : (insight.contribution || ''),
+            drivers: Array.isArray(insight.drivers) ? insight.drivers : [],
+            strategy_link: Array.isArray(insight.strategy_link) ? insight.strategy_link : [],
+            risks_and_watchlist: Array.isArray(insight.risks_and_watchlist) ? insight.risks_and_watchlist : []
+          }
+        })
+      })
+    },
+    appendBusinessHighlightsCharts(toolOutput) {
+      if (!toolOutput || typeof toolOutput !== 'object') return
+      const segmentTables = Array.isArray(toolOutput.segment_tables) ? toolOutput.segment_tables : []
+      const performanceReport = toolOutput.business_performance_report || toolOutput.businessPerformanceReport || {}
+      const segmentInsights = Array.isArray(performanceReport.segment_insights)
+        ? performanceReport.segment_insights
+        : []
+
+      const metricPriority = [
+        '营业收入', '收入', '净利润', '利润', '贷款余额',
+        'AUM', '原保费收入', '成交额', '产品收入', 'MAU'
+      ]
+      const pickMetricRow = (rows = []) => {
+        for (const keyword of metricPriority) {
+          const found = rows.find(row => row && row[0] && String(row[0]).includes(keyword))
+          if (found) return found
+        }
+        return rows.find(row => row && this.parseMetricValue(row[1]) !== null)
+      }
+
+      const segmentNames = []
+      const segmentValues = []
+      const segmentMetricLabels = []
+      const segmentNameMap = {}
+      segmentTables.forEach(segment => {
+        const segmentId = segment.segment_id
+        const segmentName = segment.segment_name || segmentId
+        if (segmentId) segmentNameMap[segmentId] = segmentName
+        const rows = segment?.table?.rows || []
+        const row = pickMetricRow(rows)
+        if (!row) return
+        const value = this.parseMetricValue(row[1])
+        if (value === null) return
+        segmentNames.push(segmentName)
+        segmentValues.push(value)
+        segmentMetricLabels.push(row[0])
+      })
+
+      if (segmentNames.length >= 2) {
+        this.visualizations.push({
+          id: `biz-segment-compare-${Date.now()}`,
+          question: '业务板块核心指标对比',
+          source: 'business_highlights',
+          data: {
+            has_visualization: true,
+            type: 'chart',
+            chart_config: {
+              traces: [{
+                type: 'bar',
+                name: '当前年度',
+                x: segmentNames,
+                y: segmentValues,
+                text: segmentMetricLabels,
+                textposition: 'auto'
+              }],
+              layout: {
+                title: '业务板块核心指标对比',
+                xaxis_title: '业务板块',
+                yaxis_title: '指标值'
+              }
+            }
+          }
+        })
+      }
+
+      segmentTables.forEach((segment, idx) => {
+        const rows = segment?.table?.rows || []
+        const metrics = rows
+          .map(row => ({
+            name: row?.[0],
+            value: this.parseMetricValue(row?.[1])
+          }))
+          .filter(item => item.name && item.value !== null)
+          .slice(0, 6)
+        if (metrics.length < 3) return
+
+        this.visualizations.push({
+          id: `biz-segment-metrics-${segment.segment_id || idx}`,
+          question: `${segment.segment_name || segment.segment_id} 指标对比`,
+          source: 'business_highlights',
+          data: {
+            has_visualization: true,
+            type: 'chart',
+            chart_config: {
+              traces: [{
+                type: 'bar',
+                name: segment.segment_name || segment.segment_id,
+                x: metrics.map(m => m.name),
+                y: metrics.map(m => m.value),
+                textposition: 'auto'
+              }],
+              layout: {
+                title: `${segment.segment_name || segment.segment_id} 指标对比`,
+                xaxis_title: '指标',
+                yaxis_title: '指标值'
+              }
+            }
+          }
+        })
+      })
+
+      const segmentShareLabels = []
+      const segmentShareValues = []
+      segmentTables.forEach(segment => {
+        const rows = segment?.table?.rows || []
+        const shareRow = rows.find(row => row && row[0] && String(row[0]).includes('占比'))
+        if (!shareRow) return
+        const value = this.parseMetricValue(shareRow[1])
+        if (value === null) return
+        segmentShareLabels.push(segment.segment_name || segment.segment_id)
+        segmentShareValues.push(value)
+      })
+
+      if (segmentShareLabels.length >= 2) {
+        const shareTraces = segmentShareLabels.map((label, idx) => ({
+          type: 'bar',
+          name: label,
+          x: ['业务结构'],
+          y: [segmentShareValues[idx]]
+        }))
+        this.visualizations.push({
+          id: `biz-structure-share-${Date.now()}`,
+          question: '业务结构占比对比',
+          source: 'business_highlights',
+          data: {
+            has_visualization: true,
+            type: 'chart',
+            chart_config: {
+              traces: shareTraces,
+              layout: {
+                title: '业务结构占比对比',
+                barmode: 'stack',
+                xaxis_title: '',
+                yaxis_title: '占比(%)'
+              }
+            }
+          }
+        })
+      } else if (segmentNames.length >= 2) {
+        this.visualizations.push({
+          id: `biz-structure-treemap-${Date.now()}`,
+          question: '业务结构分布',
+          source: 'business_highlights',
+          data: {
+            has_visualization: true,
+            type: 'chart',
+            chart_config: {
+              traces: [{
+                type: 'treemap',
+                labels: segmentNames,
+                parents: segmentNames.map(() => ''),
+                values: segmentValues
+              }],
+              layout: {
+                title: '业务结构分布'
+              }
+            }
+          }
+        })
+      }
+
+      if (segmentInsights.length >= 2) {
+        const dimensions = ['规模增长', '客户增长', '结构优化', '数字化渗透', '风险改善']
+        const keywords = {
+          '规模增长': ['规模', '增长', '提升', '扩张', '收入', '贷款', '放款', '投放'],
+          '客户增长': ['客户', '用户', 'AUM', '户', '客户数', '注册'],
+          '结构优化': ['结构', '优化', '转型', '调整', '质量', '组合'],
+          '数字化渗透': ['数字', '科技', '平台', '线上', 'AI', '智能', '系统'],
+          '风险改善': ['风险', '不良', '减值', '资产质量', '风控', '拨备']
+        }
+        const negativeKeywords = ['上升', '恶化', '压力', '增加', '攀升']
+        const scoreInsight = (insight, dimension) => {
+          const textParts = [
+            insight.headline,
+            ...(Array.isArray(insight.contribution) ? insight.contribution : []),
+            ...(Array.isArray(insight.drivers) ? insight.drivers : []),
+            ...(Array.isArray(insight.strategy_link) ? insight.strategy_link : []),
+            ...(Array.isArray(insight.risks_and_watchlist) ? insight.risks_and_watchlist : [])
+          ]
+          const text = textParts.filter(Boolean).join(' ')
+          let hits = 0
+          keywords[dimension].forEach(word => {
+            if (text.includes(word)) hits += 1
+          })
+          let score = Math.min(5, 2 + hits)
+          if (dimension === '风险改善') {
+            negativeKeywords.forEach(word => {
+              if (text.includes(word)) score = Math.max(1, score - 1)
+            })
+          }
+          return score
+        }
+
+        const traces = segmentInsights.map((insight, idx) => {
+          const segmentId = insight.segment_id || `segment-${idx}`
+          const name = insight.segment_name || segmentNameMap[segmentId] || segmentId
+          const values = dimensions.map(dim => scoreInsight(insight, dim))
+          return {
+            type: 'scatterpolar',
+            name,
+            r: values,
+            theta: dimensions,
+            fill: 'toself'
+          }
+        })
+
+        this.visualizations.push({
+          id: `biz-segment-radar-${Date.now()}`,
+          question: '业务板块能力雷达',
+          source: 'business_highlights',
+          data: {
+            has_visualization: true,
+            type: 'chart',
+            chart_config: {
+              traces,
+              layout: {
+                title: '业务板块能力雷达',
+                polar: { radialaxis: { visible: true, range: [0, 5] } }
+              }
+            }
+          }
+        })
+      }
+    },
+    formatBusinessHighlightsReport(payload) {
+      if (!payload || typeof payload !== 'object') return ''
+      const highlights = Array.isArray(payload.highlights) ? payload.highlights : []
+      const performanceReport = payload.business_performance_report || payload.businessPerformanceReport || {}
+      const segmentInsights = Array.isArray(performanceReport.segment_insights)
+        ? performanceReport.segment_insights
+        : []
+      const segmentMap = new Map()
+
+      highlights.forEach(item => {
+        if (!item) return
+        const key = item.business_type || '业务板块'
+        segmentMap.set(key, { name: key, highlight: item })
+      })
+
+      segmentInsights.forEach((insight, idx) => {
+        if (!insight) return
+        const key = insight.segment_name || insight.segment_id || `业务板块${idx + 1}`
+        const entry = segmentMap.get(key) || { name: key }
+        entry.insight = insight
+        segmentMap.set(key, entry)
+      })
+
+      if (segmentMap.size === 0) return ''
+
+      const sections = []
+      if (payload.overall_summary) {
+        sections.push(`### 总体结论\n${payload.overall_summary}`)
+      }
+      segmentMap.forEach(entry => {
+        const lines = [`### ${entry.name}`]
+        if (entry.highlight?.highlights) {
+          lines.push(`- 业务亮点：${entry.highlight.highlights}`)
+        }
+        if (Array.isArray(entry.highlight?.achievements) && entry.highlight.achievements.length) {
+          lines.push(`- 主要成就：${entry.highlight.achievements.join('；')}`)
+        }
+        const insight = entry.insight
+        if (insight?.headline) {
+          lines.push(`- 一句话结论：${insight.headline}`)
+        }
+        if (insight?.contribution) {
+          const text = Array.isArray(insight.contribution) ? insight.contribution.join('；') : insight.contribution
+          if (text) lines.push(`- 贡献：${text}`)
+        }
+        if (insight?.drivers) {
+          const text = Array.isArray(insight.drivers) ? insight.drivers.join('；') : insight.drivers
+          if (text) lines.push(`- 驱动：${text}`)
+        }
+        if (insight?.strategy_link) {
+          const text = Array.isArray(insight.strategy_link) ? insight.strategy_link.join('；') : insight.strategy_link
+          if (text) lines.push(`- 战略联动：${text}`)
+        }
+        if (insight?.risks_and_watchlist) {
+          const text = Array.isArray(insight.risks_and_watchlist)
+            ? insight.risks_and_watchlist.join('；')
+            : insight.risks_and_watchlist
+          if (text) lines.push(`- 风险关注：${text}`)
+        }
+        sections.push(lines.join('\n'))
+      })
+
+      return sections.join('\n\n')
     },
     async handleSubmit() {
       if (!this.inputText.trim() || this.loading) return
@@ -517,13 +1001,22 @@ export default {
                 this.structuredData.financialReview = textContent || toolOutput
                 console.log('✅ [AgentAnalysisPage] 设置财务点评数据', typeof textContent === 'string' ? `(文本，长度: ${textContent.length})` : '(对象)')
               } else if (toolName === 'generate_business_highlights' && toolOutput) {
+                this.appendBusinessHighlightsTables(toolOutput)
+                this.appendBusinessHighlightsInsights(toolOutput)
+                this.appendBusinessHighlightsCharts(toolOutput)
+                const summary = toolOutput?.overall_summary ? `**总体结论：** ${toolOutput.overall_summary}` : ''
+                const formattedReport = this.formatBusinessHighlightsReport(toolOutput)
                 const textContent = extractTextFromToolOutput(toolOutput)
-                this.structuredData.businessHighlights = textContent || toolOutput
-                console.log('✅ [AgentAnalysisPage] 设置业务亮点数据', typeof textContent === 'string' ? `(文本，长度: ${textContent.length})` : '(对象)')
+                this.structuredData.businessHighlights = formattedReport || summary || textContent || toolOutput
+                console.log('✅ [AgentAnalysisPage] 设置业务亮点数据')
               } else if (toolName === 'generate_business_guidance' && toolOutput) {
-                const textContent = extractTextFromToolOutput(toolOutput)
-                this.structuredData.businessGuidance = textContent || toolOutput
-                console.log('✅ [AgentAnalysisPage] 设置业绩指引数据', typeof textContent === 'string' ? `(文本，长度: ${textContent.length})` : '(对象)')
+                if (this.isBusinessGuidanceObject(toolOutput)) {
+                  this.structuredData.businessGuidance = toolOutput
+                } else {
+                  const textContent = extractTextFromToolOutput(toolOutput)
+                  this.structuredData.businessGuidance = textContent || toolOutput
+                }
+                console.log('✅ [AgentAnalysisPage] 设置业绩指引数据', this.isBusinessGuidanceObject(this.structuredData.businessGuidance) ? '(对象)' : '(文本)')
               } else if (toolName === 'generate_visualization' && toolOutput && toolOutput.has_visualization) {
                 this.visualizations.push({
                   id: Date.now().toString() + '-' + this.visualizations.length,
@@ -549,7 +1042,14 @@ export default {
               this.structuredData.financialReview = structured.financial_review
             }
             if (structured.business_highlights) {
-              this.structuredData.businessHighlights = structured.business_highlights
+              this.appendBusinessHighlightsTables(structured.business_highlights)
+              this.appendBusinessHighlightsInsights(structured.business_highlights)
+              this.appendBusinessHighlightsCharts(structured.business_highlights)
+              const summary = structured.business_highlights?.overall_summary
+                ? `**总体结论：** ${structured.business_highlights.overall_summary}`
+                : ''
+              const formattedReport = this.formatBusinessHighlightsReport(structured.business_highlights)
+              this.structuredData.businessHighlights = formattedReport || summary || structured.business_highlights
             }
             if (structured.business_guidance) {
               this.structuredData.businessGuidance = structured.business_guidance
@@ -685,10 +1185,14 @@ export default {
       }
     },
     removeVisualization(index) {
-      const viz = this.visualizations[index]
-      if (viz && window.Plotly) {
+      const resolvedIndex = typeof index === 'number'
+        ? index
+        : this.visualizations.findIndex(viz => viz.id === index?.id)
+      if (resolvedIndex < 0) return
+      const viz = this.visualizations[resolvedIndex]
+      if (viz?.data?.chart_config && window.Plotly) {
         try {
-          const chartElement = document.getElementById(`agent-viz-${viz.id || index}`)
+          const chartElement = document.getElementById(`agent-viz-${viz.id || resolvedIndex}`)
           if (chartElement) {
             window.Plotly.purge(chartElement)
           }
@@ -696,11 +1200,16 @@ export default {
           console.warn('清理图表失败:', error)
         }
       }
-      this.visualizations.splice(index, 1)
+      this.visualizations.splice(resolvedIndex, 1)
     },
     renderAllCharts() {
       this.visualizations.forEach((viz, idx) => {
-        if (viz.data && viz.data.has_visualization && viz.data.type !== 'financial_table') {
+        if (
+          viz.data &&
+          viz.data.has_visualization &&
+          viz.data.type !== 'financial_table' &&
+          viz.data.type !== 'insight_card'
+        ) {
           setTimeout(() => {
             this.renderChart(viz.id || idx, viz.data)
           }, 100 * (idx + 1))
@@ -733,6 +1242,17 @@ export default {
             if (trace.type === 'pie') {
               plotlyTrace.labels = trace.text || []
               plotlyTrace.values = trace.y || []
+            } else if (trace.type === 'treemap') {
+              plotlyTrace.labels = trace.labels || []
+              plotlyTrace.parents = trace.parents || []
+              plotlyTrace.values = trace.values || []
+            } else if (trace.type === 'sankey') {
+              plotlyTrace.node = trace.node || {}
+              plotlyTrace.link = trace.link || {}
+            } else if (trace.type === 'scatterpolar') {
+              plotlyTrace.r = trace.r || []
+              plotlyTrace.theta = trace.theta || []
+              plotlyTrace.fill = trace.fill
             } else {
               plotlyTrace.x = trace.x || []
               plotlyTrace.y = trace.y || []
@@ -1535,6 +2055,8 @@ export default {
   margin-left: 20px;
   margin-bottom: 12px;
 }
+
+/* 业绩指引使用 summary-block 样式对齐财务点评 */
 
 /* 杜邦分析特殊样式 */
 .dupont-content {

@@ -14,14 +14,11 @@ from llama_index.core.llms import ChatMessage
 # 忽略Pydantic JSON schema警告（query_engine参数通过partial绑定，不需要序列化）
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.json_schema")
 from models.report_models import AnnualReportAnalysis
-from agents.report_tools import (
-    generate_financial_review,
-    generate_business_guidance,
-    generate_business_highlights,
-    generate_profit_forecast_and_valuation,
-    retrieve_financial_data,
-    retrieve_business_data
-)
+from agents.financial_review import generate_financial_review
+from agents.business_guidance import generate_business_guidance
+from agents.business_highlights import generate_business_highlights
+from agents.profit_forecast import generate_profit_forecast_and_valuation
+from agents.report_common import retrieve_financial_data, retrieve_business_data
 from agents.visualization_agent import generate_visualization_for_query
 from agents.dupont_tools import generate_dupont_analysis
 
@@ -461,6 +458,25 @@ class ReportAgent:
             
             # 使用query管线，确保可视化与精简输出一致
             result = await self.query(query)
+
+            # 业务亮点：如果没有可视化，则基于分析文本补充可视化（图文结合）
+            if section_name == "business_highlights" and not result.get("visualization"):
+                answer_text = result.get("answer") or result.get("content") or ""
+                if isinstance(answer_text, str) and answer_text.strip():
+                    try:
+                        import asyncio
+                        visualization = await asyncio.wait_for(
+                            generate_visualization_for_query(
+                                query=query,
+                                answer=answer_text
+                            ),
+                            timeout=25.0
+                        )
+                        if isinstance(visualization, dict) and visualization.get("has_visualization"):
+                            result["visualization"] = visualization
+                            logger.info("✅ 业务亮点已补充可视化")
+                    except Exception as viz_error:
+                        logger.warning(f"⚠️ 业务亮点可视化补充失败: {viz_error}")
             
             logger.info(f"✅ 章节生成成功: {section_name}")
             
@@ -637,28 +653,76 @@ class ReportAgent:
                                     guidance_period = raw_output.get("guidance_period")
                                     expected_performance = raw_output.get("expected_performance")
                                     parent_profit = raw_output.get("parent_net_profit_range")
+                                    parent_profit_growth = raw_output.get("parent_net_profit_growth_range")
+                                    non_recurring_profit = raw_output.get("non_recurring_profit_range")
+                                    eps_range = raw_output.get("eps_range")
                                     revenue_range = raw_output.get("revenue_range")
                                     business_guidance = raw_output.get("business_specific_guidance") or []
+                                    key_metrics = raw_output.get("key_metrics") or []
                                     risk_warnings = raw_output.get("risk_warnings") or []
-                                    parts = []
+
+                                    what_parts = []
                                     if guidance_period:
-                                        parts.append(f"{guidance_period}业绩指引")
+                                        what_parts.append(f"期间：{guidance_period}")
                                     if expected_performance:
-                                        parts.append(expected_performance)
-                                    if parent_profit or revenue_range:
-                                        metrics = []
-                                        if parent_profit:
-                                            metrics.append(f"归母净利润：{parent_profit}")
-                                        if revenue_range:
-                                            metrics.append(f"营业收入：{revenue_range}")
-                                        parts.append("关键指标：" + "，".join(metrics))
-                                    if business_guidance:
-                                        parts.append("业务指引：" + "；".join(business_guidance[:3]))
-                                    if risk_warnings:
-                                        parts.append("风险提示：" + "；".join(risk_warnings[:3]))
-                                    summary_text = "。".join([p for p in parts if p])
+                                        what_parts.append(expected_performance)
+                                    what_text = "；".join(what_parts) if what_parts else "未披露"
+
+                                    metrics = []
+                                    if parent_profit:
+                                        metrics.append(f"归母净利润：{parent_profit}")
+                                    if parent_profit_growth:
+                                        metrics.append(f"归母净利润增长率：{parent_profit_growth}")
+                                    if non_recurring_profit:
+                                        metrics.append(f"扣非净利润：{non_recurring_profit}")
+                                    if eps_range:
+                                        metrics.append(f"基本每股收益：{eps_range}")
+                                    if revenue_range:
+                                        metrics.append(f"营业收入：{revenue_range}")
+                                    combined_metrics = []
+                                    if metrics:
+                                        combined_metrics.extend(metrics)
+                                    if key_metrics:
+                                        for metric in key_metrics:
+                                            if metric not in combined_metrics:
+                                                combined_metrics.append(metric)
+                                    if combined_metrics:
+                                        watch_text = "；".join(combined_metrics[:8])
+                                    elif expected_performance:
+                                        watch_text = "年报未明确量化口径，可关注收入、利润及资产质量等表述线索"
+                                    else:
+                                        watch_text = "年报未明确量化口径，可关注收入、利润及资产质量等关键指标"
+
+                                    how_text = "；".join(business_guidance[:5]) if business_guidance else "未明确"
+                                    risk_text = "；".join(risk_warnings[:5]) if risk_warnings else "未明确"
+
+                                    summary_text = "\n".join([
+                                        f"- ① 经营目标方向：{what_text}",
+                                        f"- ② 核心指标锚点：{watch_text}",
+                                        f"- ③ 关键执行路径：{how_text}",
+                                        f"- ④ 不确定性与边界：{risk_text}"
+                                    ])
                                 elif tool_name == "generate_business_highlights":
                                     overall_summary = raw_output.get("overall_summary")
+                                    segment_tables = raw_output.get("segment_tables") or []
+                                    if segment_tables:
+                                        tables = []
+                                        for segment in segment_tables:
+                                            table = segment.get("table") if isinstance(segment, dict) else None
+                                            if not isinstance(table, dict):
+                                                continue
+                                            if not table.get("insight"):
+                                                conclusion = segment.get("conclusion")
+                                                if conclusion:
+                                                    table["insight"] = conclusion
+                                            tables.append(table)
+                                        if tables:
+                                            visualization_data = {
+                                                "has_visualization": True,
+                                                "type": "financial_tables",
+                                                "visualization_type": "table",
+                                                "tables": tables
+                                            }
                                     if overall_summary:
                                         summary_text = overall_summary
                                     else:
@@ -716,8 +780,18 @@ class ReportAgent:
                                         parts.append("洞察：" + "；".join(insights[:2]))
                                     summary_text = "；".join([p for p in parts if p])
                                 if summary_text:
-                                    summary_override = summary_text
-                                    tool_output_serializable = {"summary": summary_text}
+                                    if tool_name == "generate_business_highlights":
+                                        # 业务亮点保留完整正文，不使用 summary 覆盖
+                                        if isinstance(tool_output_serializable, dict):
+                                            tool_output_serializable.setdefault("summary", summary_text)
+                                    elif tool_name == "generate_business_guidance":
+                                        # 保留结构化数据，summary 只用于聊天区展示
+                                        summary_override = summary_text
+                                        if isinstance(tool_output_serializable, dict):
+                                            tool_output_serializable.setdefault("summary", summary_text)
+                                    else:
+                                        summary_override = summary_text
+                                        tool_output_serializable = {"summary": summary_text}
 
                             # 确保工具输出是可序列化的字典格式
                             tool_result = {
@@ -730,6 +804,20 @@ class ReportAgent:
                             if tool_name in tool_call_times:
                                 tool_result["execution_time"] = tool_end_time - tool_call_times[tool_name]["start"]
                             
+                            # 业务亮点工具输出可能嵌套在 raw_output 中，展开常用字段便于前端消费
+                            if (
+                                tool_name == "generate_business_highlights"
+                                and isinstance(tool_output_serializable, dict)
+                            ):
+                                raw_output = tool_output_serializable.get("raw_output")
+                                if isinstance(raw_output, dict):
+                                    if "segment_tables" in raw_output and "segment_tables" not in tool_output_serializable:
+                                        tool_output_serializable["segment_tables"] = raw_output.get("segment_tables")
+                                    if "overall_summary" in raw_output and "overall_summary" not in tool_output_serializable:
+                                        tool_output_serializable["overall_summary"] = raw_output.get("overall_summary")
+                                    if "key_metrics_summary" in raw_output and "key_metrics_summary" not in tool_output_serializable:
+                                        tool_output_serializable["key_metrics_summary"] = raw_output.get("key_metrics_summary")
+
                             tool_results.append(tool_result)
                             
                             logger.info(f"✅ [Agent Query] [{event_time:.2f}s] 工具 {tool_name} 结果已添加到tool_results，当前总数: {len(tool_results)}")

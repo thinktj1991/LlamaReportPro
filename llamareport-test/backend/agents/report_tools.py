@@ -925,6 +925,13 @@ async def generate_business_guidance(
         # 检索业绩指引相关数据
         query = f"{company_name} {year}年 业绩预告 业绩指引 下一年度预期 经营计划"
         guidance_data = query_engine.query(query)
+
+        # 补充检索核心指标锚点
+        key_metrics_query = (
+            f"{company_name} {year}年 业绩指引 关键指标 经营指标 财务指标 "
+            "营业收入 净利润 净息差 不良率 资本充足率 成本收入比"
+        )
+        key_metrics_data = query_engine.query(key_metrics_query)
         
         # 使用 LLM 生成结构化的业绩指引
         llm = Settings.llm
@@ -937,46 +944,18 @@ async def generate_business_guidance(
 
 {str(guidance_data)}
 
-## 分析要求
-请生成结构化的业绩指引分析，要求如下：
+补充的关键指标线索（如有）：
+{str(key_metrics_data)}
 
-### 1. 业绩预告期间
-- 明确业绩预告或指引覆盖的时间范围
-- 说明是年度、半年度还是季度指引
+## 分析要求（思考流程不变）
+请先按“字段清单”组织信息，覆盖要点并避免遗漏。
+然后按“输出格式”生成最终内容。
 
-### 2. 预计的经营业绩描述
-- 详细描述公司对经营业绩的预期
-- 包括收入、利润、资产总额等关键指标
-- 说明业绩预期的主要驱动因素
+## 结构化参考（用于组织内容，不是输出格式要求）
+以下JSON结构仅作为字段清单，帮助你组织思考。
+不要输出JSON或代码块。
 
-### 3. 归母净利润范围和增长率范围
-- 如有具体数值范围，明确标注
-- 计算增长率预期
-- 对比历史数据，评估预期的合理性
-
-### 4. 各业务的具体指引
-- 分析各业务板块的业绩预期
-- 识别增长最快的业务领域
-- 说明各业务的发展策略和重点
-
-### 5. 风险提示
-- 识别可能影响业绩达成的风险因素
-- 包括市场风险、经营风险、政策风险等
-- 评估风险对业绩的影响程度
-
-## ⚠️ 严格输出要求（必须遵守）
-你必须输出一个有效的JSON对象，且仅输出JSON，不要有任何其他文字说明。
-
-### JSON格式要求：
-1. 必须是有效的JSON格式，可以直接被JSON.parse()解析
-2. 不要使用markdown代码块（不要用```json包裹）
-3. 不要有任何前缀或后缀文字
-4. 直接输出JSON对象，从{{开始，以}}结束
-5. 所有字符串值必须用双引号包裹
-6. 所有数字和布尔值不要用引号
-7. 确保所有必需字段都存在
-
-### JSON结构（必须严格遵循）：
+### 字段清单（示例结构）：
 {{
   "guidance_period": "业绩预告期间，如'2025年度'",
   "expected_performance": "预计的经营业绩描述",
@@ -985,14 +964,45 @@ async def generate_business_guidance(
   "non_recurring_profit_range": "扣非净利润范围（如有，否则null）",
   "eps_range": "基本每股收益范围（如有，否则null）",
   "revenue_range": "营业收入范围（如有，否则null）",
+  "key_metrics": ["指标A：数值（含单位/口径）", "指标B：数值（含同比/增速）"],
   "business_specific_guidance": ["业务1指引", "业务2指引"],
   "risk_warnings": ["风险1", "风险2"]
 }}
 
 ### 重要提示：
-- 如果某些数据缺失，使用null或空数组[]
-- 所有字段都必须存在，不能省略
-- 直接输出上述JSON结构，不要有任何其他内容
+- 如果某些数据缺失，请如实说明，不要编造
+- 关注可读性与专业性，避免空泛表述
+- “核心指标锚点”必须有具体数值支撑，优先从“补充的关键指标线索”中提炼
+
+## 输出格式（最终输出，必须遵守）
+必须严格按①~④四个方面输出，每个方面单独成点（一个编号=一个要点段落）。
+
+① 经营目标方向（What）
+接下来一段时间，公司要“优先做好什么”？
+最低要求（至少说清楚一个）：
+- 追求增长 vs 稳定
+- 盈利优先 vs 规模优先
+- 修复 vs 转型
+📌 典型表述：
+- “坚持稳健经营”
+- “优先保证资产质量”
+- “以盈利能力改善为核心”
+
+② 核心指标锚点（Watch）
+希望“盯哪些指标”？
+
+③ 关键执行路径（How）
+- 结构调整
+- 成本控制
+- 风控加强
+- 资源倾斜方向
+
+④ 不确定性与边界
+这一块99% 藏在风险提示里：
+- 外部环境
+- 政策变化
+- 行业周期
+- 客户行为
 """
 
         # 使用结构化输出 - 添加异常处理和性能监控
@@ -1002,7 +1012,7 @@ async def generate_business_guidance(
         try:
             sllm = llm.as_structured_llm(BusinessGuidance)
             raw_response = await sllm.achat([
-                ChatMessage(role="system", content="你是一个专业的财务分析师,擅长分析业绩指引。你必须严格按照用户要求的JSON格式输出，只输出JSON，不要有任何其他文字。"),
+                ChatMessage(role="system", content="你是一个专业的财务分析师,擅长分析业绩指引。请按字段提供清晰内容，系统会自动结构化，不要输出JSON或代码块。"),
                 ChatMessage(role="user", content=prompt)
             ])
             
@@ -1018,7 +1028,10 @@ async def generate_business_guidance(
                         parsed_data = parsed_data['business_guidance']
                     response = BusinessGuidance(**parsed_data) if isinstance(parsed_data, dict) and 'guidance_period' in parsed_data else parsed_data
                 else:
-                    raise ValueError("无法从字符串响应提取JSON")
+                    response = BusinessGuidance(
+                        guidance_period=f"{year}年度",
+                        expected_performance=raw_response
+                    )
             elif isinstance(raw_response, BusinessGuidance):
                 response = raw_response
             elif hasattr(raw_response, 'message') and hasattr(raw_response.message, 'content'):
@@ -1035,7 +1048,10 @@ async def generate_business_guidance(
                             parsed_data = parsed_data['business_guidance']
                         response = BusinessGuidance(**parsed_data) if isinstance(parsed_data, dict) and 'guidance_period' in parsed_data else parsed_data
                     else:
-                        raise ValueError("无法从message.content提取JSON")
+                        response = BusinessGuidance(
+                            guidance_period=f"{year}年度",
+                            expected_performance=content
+                        )
                 else:
                     response = content
             else:
@@ -1060,7 +1076,7 @@ async def generate_business_guidance(
             # 回退到普通LLM输出
             try:
                 normal_response = await llm.achat([
-                    ChatMessage(role="system", content="你是一个专业的财务分析师,擅长分析业绩指引。你必须严格按照用户要求的JSON格式输出，只输出JSON，不要有任何其他文字。"),
+                    ChatMessage(role="system", content="你是一个专业的财务分析师,擅长分析业绩指引。请按字段提供清晰内容，系统会自动结构化，不要输出JSON或代码块。"),
                     ChatMessage(role="user", content=prompt)
                 ])
                 
@@ -1091,7 +1107,10 @@ async def generate_business_guidance(
                         # 返回部分数据，至少包含基本信息
                         response = parsed_data if isinstance(parsed_data, dict) else {"content": content}
                 else:
-                    raise ValueError("无法从响应中提取JSON")
+                    response = BusinessGuidance(
+                        guidance_period=f"{year}年度",
+                        expected_performance=content
+                    )
             except Exception as fallback_error:
                 logger.error(f"❌ 回退方案也失败: {str(fallback_error)}")
                 # 返回错误信息，但不中断流程

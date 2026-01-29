@@ -4,7 +4,7 @@
 """
 
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from datetime import datetime
 
 
@@ -131,6 +131,9 @@ class BusinessGuidance(BaseModel):
     non_recurring_profit_range: Optional[str] = Field(default=None, description="扣非净利润范围")
     eps_range: Optional[str] = Field(default=None, description="基本每股收益范围")
     revenue_range: Optional[str] = Field(default=None, description="营业收入范围")
+
+    # 核心指标锚点
+    key_metrics: Optional[List[str]] = Field(default=None, description="核心指标锚点")
     
     # 各业务的具体指引
     business_specific_guidance: Optional[List[str]] = Field(default=None, description="各业务具体指引")
@@ -152,6 +155,10 @@ class BusinessHighlights(BaseModel):
     """业务亮点(第三部分)"""
     highlights: List[BusinessHighlight] = Field(description="各业务亮点列表")
     overall_summary: str = Field(description="业务亮点总结")
+    key_metrics_summary: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="关键业务指标汇总表"
+    )
 
 
 # ==================== 盈利预测和估值模型 ====================

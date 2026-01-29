@@ -13,7 +13,7 @@ from datetime import datetime
 from core.rag_engine import RAGEngine
 from agents.visualization_agent import VisualizationAgent
 from models.report_models import FinancialSnapshot, KeyFinancialMetric
-from agents.report_tools import retrieve_financial_data
+from agents.report_common import retrieve_financial_data
 from agents.dupont_tools import parse_financial_data_response, extract_financial_data_for_dupont, generate_dupont_analysis
 import re
 from typing import Dict, Any, Optional, List
@@ -769,6 +769,22 @@ async def generate_dupont_analysis_api(request: DupontAnalysisRequest):
         
         # 转换结果
         serializable_result = convert_decimal_to_float(dupont_result)
+
+        # 读取结构化指标JSON（用于前端年份切换）
+        metrics_json = None
+        try:
+            import json
+            import re
+            from pathlib import Path
+
+            safe_company = re.sub(r'[^\w\u4e00-\u9fff\-]+', '_', company_name or 'unknown')
+            safe_year = re.sub(r'[^\d]+', '', str(year or ''))
+            metrics_path = Path("storage") / f"dupont_metrics_{safe_company}_{safe_year or 'unknown'}.json"
+            if metrics_path.exists():
+                with open(metrics_path, "r", encoding="utf-8") as f:
+                    metrics_json = json.load(f)
+        except Exception as e:
+            logger.warning(f"读取结构化指标JSON失败: {str(e)}")
         
         return JSONResponse(
             status_code=200,
@@ -776,7 +792,8 @@ async def generate_dupont_analysis_api(request: DupontAnalysisRequest):
                 "status": "success",
                 "company_name": company_name,
                 "year": year,
-                "analysis": serializable_result
+                "analysis": serializable_result,
+                "metrics": metrics_json
             }
         )
         

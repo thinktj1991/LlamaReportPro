@@ -397,7 +397,7 @@ const App = {
       metricKeywords.forEach((keyword) => {
         result = result.replaceAll(keyword, `<span class="insight-key">${keyword}</span>`)
       })
-      result = result.replace(/(-?\d{1,3}(?:,\d{3})*(?:\.\d+)?%?|-?\d+(?:\.\d+)?%?)(万亿元|亿元|万元|元)?/g, (match) => {
+      result = result.replace(/(-?\d{4,}(?:\.\d+)?%?|-?\d{1,3}(?:,\d{3})+(?:\.\d+)?%?|-?\d{1,3}(?:\.\d+)?%?)(万亿元|亿元|万元|元)?/g, (match) => {
         return `<span class="insight-num">${match}</span>`
       })
       result = result.replace(/(增长|上升|提升|扩大|改善|增加|上行|回升)/g, '<span class="insight-up">$1</span>')
@@ -462,6 +462,75 @@ const App = {
       return `<div class="summary-block">${items.join('')}</div>`
     }
 
+    const extractBusinessGuidancePayload = (result) => {
+      if (!result || typeof result !== 'object') return null
+      const structured = result.structured_response || {}
+      if (structured.business_guidance) return structured.business_guidance
+      const toolCall = Array.isArray(result.tool_calls)
+        ? result.tool_calls.find(tc => tc.tool_name === 'generate_business_guidance')
+        : null
+      if (!toolCall) return null
+      let output = toolCall.tool_output || toolCall.output || null
+      if (output && output.raw_output) output = output.raw_output
+      if (typeof output === 'string') {
+        try {
+          output = JSON.parse(output)
+        } catch (e) {
+          return null
+        }
+      }
+      return output && typeof output === 'object' ? output : null
+    }
+
+    const formatBusinessGuidanceSummary = (payload = {}) => {
+      if (!payload || typeof payload !== 'object') return ''
+      const guidancePeriod = payload.guidance_period || payload.guidancePeriod
+      const expectedPerformance = payload.expected_performance || payload.expectedPerformance
+      const parentProfit = payload.parent_net_profit_range || payload.parentNetProfitRange
+      const parentProfitGrowth = payload.parent_net_profit_growth_range || payload.parentNetProfitGrowthRange
+      const nonRecurringProfit = payload.non_recurring_profit_range || payload.nonRecurringProfitRange
+      const epsRange = payload.eps_range || payload.epsRange
+      const revenueRange = payload.revenue_range || payload.revenueRange
+      const keyMetrics = payload.key_metrics || payload.keyMetrics || []
+      const businessGuidance = payload.business_specific_guidance || payload.businessSpecificGuidance || []
+      const riskWarnings = payload.risk_warnings || payload.riskWarnings || []
+
+      const whatParts = []
+      if (guidancePeriod) whatParts.push(`期间：${guidancePeriod}`)
+      if (expectedPerformance) whatParts.push(expectedPerformance)
+      const whatText = whatParts.length ? whatParts.join('；') : '未明确'
+
+      const metricParts = []
+      if (parentProfit) metricParts.push(`归母净利润：${parentProfit}`)
+      if (parentProfitGrowth) metricParts.push(`归母净利润增长率：${parentProfitGrowth}`)
+      if (nonRecurringProfit) metricParts.push(`扣非净利润：${nonRecurringProfit}`)
+      if (epsRange) metricParts.push(`基本每股收益：${epsRange}`)
+      if (revenueRange) metricParts.push(`营业收入：${revenueRange}`)
+      const watchList = metricParts.length ? metricParts : (Array.isArray(keyMetrics) ? keyMetrics : [])
+      const watchText = watchList.length ? watchList.join('；') : '年报未明确量化口径'
+
+      const howText = Array.isArray(businessGuidance) && businessGuidance.length
+        ? businessGuidance.join('；')
+        : '未明确'
+      const riskText = Array.isArray(riskWarnings) && riskWarnings.length
+        ? riskWarnings.join('；')
+        : '未明确'
+
+      const items = [
+        { label: '① 经营目标方向', text: whatText },
+        { label: '② 核心指标锚点', text: watchText },
+        { label: '③ 关键执行路径', text: howText },
+        { label: '④ 不确定性与边界', text: riskText }
+      ].map(item => (
+        `<div class="summary-item"><span class="summary-label">${item.label}</span><div class="summary-text">${highlightInsightText(item.text)}</div></div>`
+      ))
+
+      if (!items.length) {
+        return ''
+      }
+      return `<div class="summary-block">${items.join('')}</div>`
+    }
+
     const formatTableInsight = (insight = '') => {
       const text = String(insight)
       if (!text) return ''
@@ -472,6 +541,184 @@ const App = {
         return `<span class="insight-label">${label}</span>：${highlightInsightText(content)}`
       }
       return highlightInsightText(text)
+    }
+
+    const hiddenBusinessMetricTables = ['零售银行业务指标', '对公银行业务指标', '同业与资金业务指标']
+    const isHiddenBusinessMetricTable = (title = '') => hiddenBusinessMetricTables
+      .some(item => String(title || '').includes(item))
+
+    const stripMarkdownText = (text = '') => String(text)
+      .replace(/[`*_]+/g, '')
+      .replace(/\[[^\]]+\]\([^)]+\)/g, '')
+      .replace(/<[^>]+>/g, '')
+      .trim()
+
+    const sanitizeCardTitle = (title = '') => stripMarkdownText(title)
+      .replace(/^#{1,6}\s*/g, '')
+      .replace(/^[一二三四五六七八九十]+[、.]\s*/g, '')
+      .replace(/^[\d]+\.\s*/g, '')
+      .replace(/^【|】$/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+
+    const extractKeyMetricsTable = (text = '') => {
+      if (!text) return null
+      const lines = String(text).split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+      const keywordList = ['关键业务指标汇总', '关键业务指标', '关键指标']
+      const startIndex = lines.findIndex(line => keywordList.some(keyword => line.includes(keyword)))
+      if (startIndex < 0) return null
+
+      const titleLine = lines[startIndex]
+      const title = keywordList.find(keyword => titleLine.includes(keyword)) || '关键业务指标'
+
+      const tableLines = []
+      for (let i = startIndex + 1; i < lines.length; i += 1) {
+        const line = lines[i]
+        if (/^[#]|^[🧾📊📈🔍⚠️🎯🏦]/.test(line)) break
+        tableLines.push(line)
+      }
+
+      if (!tableLines.length) return null
+
+      const rows = []
+      tableLines.forEach((line) => {
+        const cleanedLine = stripMarkdownText(line)
+        if (cleanedLine.includes('指标') && cleanedLine.includes('同比')) return
+        if (line.includes('|')) {
+          const pipeCells = line.split('|').map(cell => stripMarkdownText(cell)).filter(cell => cell)
+          if (pipeCells.length >= 4 && !pipeCells.every(cell => /^-+$/.test(cell))) {
+            rows.push(pipeCells.slice(0, 5))
+          }
+          return
+        }
+        const byGap = line.split(/\t+| {2,}/).filter(Boolean)
+        if (byGap.length >= 5) {
+          rows.push(byGap.slice(0, 5).map(cell => stripMarkdownText(cell)))
+          return
+        }
+        const tokens = line.split(/\s+/).filter(Boolean)
+        const yoyIndex = tokens.findIndex(token => token.includes('%') || token.includes('百分点'))
+        if (yoyIndex >= 3) {
+          const metric = stripMarkdownText(tokens.slice(0, yoyIndex - 2).join(''))
+          const current = tokens[yoyIndex - 2]
+          const previous = tokens[yoyIndex - 1]
+          const yoy = tokens[yoyIndex]
+          const meaning = stripMarkdownText(tokens.slice(yoyIndex + 1).join(''))
+          if (metric && current && previous && yoy && meaning) {
+            rows.push([metric, current, previous, yoy, meaning])
+          }
+        }
+      })
+
+      if (!rows.length) return null
+
+      return {
+        title: sanitizeCardTitle(title),
+        headers: ['指标', '2024年', '2023年', '同比变动', '业务意义'],
+        rows: rows.map(row => row.map(cell => stripMarkdownText(cell)))
+      }
+    }
+
+    const normalizeToolOutput = (toolOutput) => {
+      if (toolOutput && typeof toolOutput === 'object' && toolOutput.raw_output !== undefined) {
+        return toolOutput.raw_output
+      }
+      return toolOutput
+    }
+
+    const extractBusinessHighlightsPayload = (result) => {
+      const structured = result?.structured_response || {}
+      if (structured.business_highlights) return structured.business_highlights
+      if (structured.businessHighlights) return structured.businessHighlights
+      const toolCalls = Array.isArray(result?.tool_calls) ? result.tool_calls : []
+      const toolCall = toolCalls.find(tc => tc?.tool_name === 'generate_business_highlights')
+      const output = normalizeToolOutput(toolCall?.tool_output)
+      return output && typeof output === 'object' ? output : null
+    }
+
+    const buildBusinessHighlightsInsightTable = (payload) => {
+      const report = payload?.business_performance_report || payload?.businessPerformanceReport || {}
+      const segmentInsights = Array.isArray(report.segment_insights)
+        ? report.segment_insights
+        : []
+      if (!segmentInsights.length) return null
+      const toText = (value) => {
+        if (Array.isArray(value)) return value.filter(Boolean).join('；')
+        return value ? String(value) : '—'
+      }
+      const rows = segmentInsights.map(insight => ([
+        insight.segment_name || insight.segment_id || '—',
+        insight.headline || '—',
+        toText(insight.contribution),
+        toText(insight.drivers),
+        toText(insight.strategy_link),
+        toText(insight.risks_and_watchlist)
+      ]))
+      return {
+        title: sanitizeCardTitle('业务亮点洞察（分业务）'),
+        headers: ['业务板块', '一句话结论', '贡献', '驱动', '战略联动', '风险关注'],
+        rows
+      }
+    }
+
+    const appendBusinessHighlightsTables = (payload) => {
+      const segmentTables = Array.isArray(payload?.segment_tables) ? payload.segment_tables : []
+      segmentTables.forEach((segment, idx) => {
+        const table = segment?.table
+        if (!table) return
+        if (isHiddenBusinessMetricTable(table.title || segment.segment_name)) return
+        const normalizedTable = {
+          ...table,
+          insight_html: formatTableInsight(table.insight)
+        }
+        visualizationCards.value.push({
+          id: `${Date.now().toString()}-biz-${idx}`,
+          question: sanitizeCardTitle(table.title || `${segment.segment_name || segment.segment_id || '业务'}指标`),
+          timestamp: new Date(),
+          data: {
+            has_visualization: true,
+            type: 'financial_table',
+            table: normalizedTable
+          },
+          type: 'financial_table'
+        })
+      })
+    }
+
+    const isMeaningfulTable = (table) => {
+      const rows = table?.rows || []
+      if (!rows.length) return false
+      return rows.some(row => row?.some(cell => {
+        const text = String(cell ?? '').trim()
+        return text && !['/', '-', '—', '暂无'].includes(text)
+      }))
+    }
+
+    const ensureKeyMetricsSummaryTable = (payload, fallbackText = '') => {
+      if (!payload || typeof payload !== 'object') return
+      const summaryTable = payload.key_metrics_summary
+      const preferredTable = summaryTable && isMeaningfulTable(summaryTable)
+        ? summaryTable
+        : extractKeyMetricsTable(fallbackText)
+      if (!preferredTable || !preferredTable.rows) return
+      const title = sanitizeCardTitle(preferredTable.title || '关键业务指标汇总')
+      if (isHiddenBusinessMetricTable(title)) return
+      const exists = visualizationCards.value.some(card => {
+        const cardTitle = card?.data?.table?.title || card?.question || ''
+        return card.type === 'financial_table' && cardTitle === title
+      })
+      if (exists) return
+      visualizationCards.value.push({
+        id: `${Date.now().toString()}-biz-key-metrics-summary`,
+        question: title,
+        timestamp: new Date(),
+        data: {
+          has_visualization: true,
+          type: 'financial_table',
+          table: preferredTable
+        },
+        type: 'financial_table'
+      })
     }
 
     const handleQuickAnalysis = async ({ sectionName, companyName, year, question, typeName }) => {
@@ -541,7 +788,10 @@ const App = {
             return '财务报表'
           }
           const formatTableTitle = (title) => {
-            const base = title || '财务表格'
+            const base = title || (sectionName === 'business_highlights' ? '业务板块指标' : '财务表格')
+            if (sectionName === 'business_highlights') {
+              return base
+            }
             return `${base}（${getTableSourceLabel(base)}）`
           }
           
@@ -589,6 +839,96 @@ const App = {
               })
             }
           }
+
+          if (sectionName === 'business_guidance') {
+            const payload = extractBusinessGuidancePayload(result)
+            if (payload) {
+              const formatted = formatBusinessGuidanceSummary(payload)
+              if (formatted) {
+                answerText = formatted
+              }
+            }
+          }
+
+          if (sectionName === 'business_highlights') {
+            const businessPayload = extractBusinessHighlightsPayload(result)
+            if (businessPayload) {
+              appendBusinessHighlightsTables(businessPayload)
+              ensureKeyMetricsSummaryTable(businessPayload, answerText)
+              const insightTable = buildBusinessHighlightsInsightTable(businessPayload)
+              if (insightTable && !isHiddenBusinessMetricTable(insightTable.title)) {
+                visualizationCards.value.push({
+                  id: `${Date.now().toString()}-biz-insight-table`,
+                  question: insightTable.title,
+                  timestamp: new Date(),
+                  data: {
+                    has_visualization: true,
+                    type: 'financial_table',
+                    table: insightTable
+                  },
+                  type: 'financial_table'
+                })
+              }
+            } else {
+              const keyMetricsTable = extractKeyMetricsTable(answerText)
+              if (keyMetricsTable && !isHiddenBusinessMetricTable(keyMetricsTable.title)) {
+                visualizationCards.value.push({
+                  id: `${Date.now().toString()}-biz-key-metrics`,
+                  question: keyMetricsTable.title,
+                  timestamp: new Date(),
+                  data: {
+                    has_visualization: true,
+                    type: 'financial_table',
+                    table: keyMetricsTable
+                  },
+                  type: 'financial_table'
+                })
+              }
+            }
+
+            if (answerText && !visualizationCards.value.some(card => card.source === 'text_viz')) {
+              try {
+                const vizResponse = await fetch('/agent/visualize-text', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    query: question || '业务亮点分析',
+                    answer: answerText,
+                    max_views: 3
+                  })
+                })
+                if (vizResponse.ok) {
+                  const textViz = await vizResponse.json()
+                  if (textViz && textViz.visualizations && Array.isArray(textViz.visualizations)) {
+                    textViz.visualizations.forEach((viz, idx) => {
+                      if (!viz || !viz.has_visualization) return
+                      visualizationCards.value.push({
+                        id: `${Date.now().toString()}-biz-text-viz-${idx}`,
+                        question: sanitizeCardTitle(viz.display_title || viz.query || question || '业务亮点分析可视化'),
+                        timestamp: new Date(),
+                        data: viz,
+                        type: 'chart',
+                        source: 'text_viz'
+                      })
+                    })
+                  } else if (textViz && textViz.has_visualization) {
+                    visualizationCards.value.push({
+                      id: `${Date.now().toString()}-biz-text-viz`,
+                      question: sanitizeCardTitle(textViz.display_title || textViz.query || question || '业务亮点分析可视化'),
+                      timestamp: new Date(),
+                      data: textViz,
+                      type: 'chart',
+                      source: 'text_viz'
+                    })
+                  }
+                } else {
+                  console.warn('⚠️ 业务亮点文本可视化请求失败:', vizResponse.status)
+                }
+              } catch (error) {
+                console.warn('⚠️ 业务亮点文本可视化请求异常:', error)
+              }
+            }
+          }
           
           if (visualization && visualization.type === 'financial_tables' && Array.isArray(visualization.tables)) {
             visualization.tables
@@ -624,7 +964,7 @@ const App = {
           if (answerText) {
             chatMessages.value.push({
               type: 'assistant',
-              content: `${answerHeader}${answerText}`,
+              content: `${answerHeader}\n\n${answerText}`,
               timestamp: new Date()
             })
           } else {
@@ -777,7 +1117,7 @@ const App = {
       
       try {
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000) // 5分钟超时
+        const timeoutId = setTimeout(() => controller.abort(), 15 * 60 * 1000) // 15分钟超时
         
         const response = await fetch('/query/dupont-analysis', {
           method: 'POST',
@@ -823,7 +1163,8 @@ const App = {
             roa: level1.roa?.formatted_value || level1.roa?.value || '—',
             equity_multiplier: level1.equity_multiplier?.formatted_value || level1.equity_multiplier?.value || '—',
             // 保存完整数据以便后续使用
-            full_data: analysis
+            full_data: analysis,
+            metrics_json: analysis.metrics_json || null
           }
           // 不添加到visualizationCards，因为杜邦分析按钮生成的视图应该通过dupontData显示
           dupontLoading.value = false
@@ -1220,6 +1561,23 @@ const App = {
         }
       }
     }
+
+          if (sectionName === 'business_highlights') {
+            const keyMetricsTable = extractKeyMetricsTable(answerText)
+            if (keyMetricsTable) {
+              visualizationCards.value.push({
+                id: `biz-key-metrics-${Date.now().toString()}`,
+                question: keyMetricsTable.title,
+                timestamp: new Date(),
+                data: {
+                  has_visualization: true,
+                  type: 'financial_table',
+                  table: keyMetricsTable
+                },
+                type: 'financial_table'
+              })
+            }
+          }
   },
   template: `
     <div class="app-container">

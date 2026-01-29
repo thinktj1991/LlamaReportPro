@@ -1894,6 +1894,11 @@ body {
     background: #ffffff;
 }
 
+.table-container.table-container--auto {
+    max-height: none;
+    overflow-y: visible;
+}
+
 .financial-table {
     width: max-content;
     min-width: 100%;

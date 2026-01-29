@@ -50,8 +50,9 @@ async def generate_dupont_analysis(
         
         # 如果没有提供财务数据，从query_engine提取
         # 使用结构化LLM输出方法，和 quick-overview 使用相同的方法，更准确
+        structured_metrics = None
         if financial_data is None:
-            financial_data = await extract_financial_data_for_dupont(
+            financial_data, structured_metrics = await extract_financial_data_for_dupont(
                 company_name, year, query_engine, filename=filename
             )
         
@@ -67,6 +68,11 @@ async def generate_dupont_analysis(
         
         # 转换为字典返回
         result_dict = dupont_result.model_dump()
+        if structured_metrics and structured_metrics.get("metrics"):
+            result_dict["metrics_json"] = structured_metrics
+            analysis_by_year = _build_analysis_by_year(structured_metrics, company_name)
+            if analysis_by_year:
+                result_dict["analysis_by_year"] = analysis_by_year
         
         logger.info(f"杜邦分析生成成功: ROE={dupont_result.level1.roe.formatted_value}")
         
@@ -84,7 +90,7 @@ async def extract_financial_data_for_dupont(
     year: str,
     query_engine,
     filename: Optional[str] = None
-) -> Dict[str, float]:
+) -> Tuple[Dict[str, float], Optional[Dict[str, Any]]]:
     """
     从query_engine提取杜邦分析所需的财务数据（优化版）
     
@@ -412,7 +418,7 @@ async def extract_financial_data_for_dupont(
                                         logger.info(f"从文本直接提取 {metric}: {value_clean}")
                                         break
         
-        return financial_data
+        return financial_data, structured_metrics
         
     except Exception as e:
         logger.error(f"提取财务数据失败: {str(e)}")
@@ -427,7 +433,7 @@ async def extract_financial_data_for_dupont(
             '股东权益': 6000000000,  # 60亿
             '流动资产': 4000000000,  # 40亿
             '非流动资产': 6000000000,  # 60亿
-        }
+        }, None
 
 
 def parse_financial_data_response_enhanced(response_text: str, context_text: str = "") -> Dict[str, float]:
@@ -762,6 +768,220 @@ def _extract_metric_from_text(
     return None, None, None
 
 
+def _extract_yeared_metrics_from_table(
+    text: str,
+    metric_defs: List[Dict[str, Any]]
+) -> Dict[str, Dict[int, Tuple[float, Optional[str], Optional[str]]]]:
+    """
+    从表格文本中按年份列提取指标
+    返回: { metric_name: { year: (value, unit, source) } }
+    """
+    if not text:
+        return {}
+
+    import re
+
+    def normalize_cell(cell: str) -> str:
+        return re.sub(r'\s+', '', cell or '')
+
+    def detect_unit(raw: str) -> Optional[str]:
+        if not raw:
+            return None
+        for unit in ["万亿", "千亿", "百万元", "千万元", "亿元", "亿", "万元", "万", "元", "%", "倍", "次"]:
+            if unit in raw:
+                return unit
+        return None
+
+    def parse_value(cell: str, unit: Optional[str], value_type: str) -> Optional[float]:
+        if not cell:
+            return None
+        cell = cell.replace(',', '').replace('，', '').strip()
+        if value_type == "percent":
+            cell = cell.replace('％', '%')
+            if '%' in cell:
+                cell = cell.replace('%', '').strip()
+            try:
+                value = float(cell)
+                return value if 0 <= value <= 100 else None
+            except (ValueError, TypeError):
+                return None
+        if value_type == "ratio":
+            cell = cell.replace('倍', '').replace('次', '').strip()
+            try:
+                value = float(cell)
+                return value if value > 0 else None
+            except (ValueError, TypeError):
+                return None
+        # amount
+        unit = unit or detect_unit(cell)
+        try:
+            value = float(re.sub(r'[^\d\.\-]', '', cell))
+        except (ValueError, TypeError):
+            return None
+        return value
+
+    alias_map = {m["metric"]: m["aliases"] for m in metric_defs}
+    value_type_map = {m["metric"]: m["type"] for m in metric_defs}
+
+    result: Dict[str, Dict[int, Tuple[float, Optional[str], Optional[str]]]] = {}
+    header_years: Dict[int, int] = {}
+    header_unit: Optional[str] = None
+
+    lines = [line for line in text.splitlines() if '|' in line]
+    for line in lines:
+        parts = [p.strip() for p in line.split('|') if p.strip()]
+        if len(parts) < 2:
+            continue
+
+        # 检测表头年份行
+        years_in_line = [int(y) for y in re.findall(r'(20\d{2})', line)]
+        if len(years_in_line) >= 1 and any('年' in p or re.match(r'20\d{2}', p) for p in parts):
+            header_years = {}
+            for idx, cell in enumerate(parts):
+                match = re.search(r'(20\d{2})', cell)
+                if match:
+                    header_years[idx] = int(match.group(1))
+            header_unit = detect_unit(line)
+            continue
+
+        if not header_years:
+            continue
+
+        metric_cell = parts[0]
+        metric_cell_norm = normalize_cell(metric_cell)
+        for metric_name, aliases in alias_map.items():
+            if any(normalize_cell(alias) in metric_cell_norm for alias in aliases):
+                unit = detect_unit(metric_cell) or header_unit
+                for idx, year in header_years.items():
+                    if idx >= len(parts):
+                        continue
+                    value = parse_value(parts[idx], unit, value_type_map[metric_name])
+                    if value is None:
+                        continue
+                    result.setdefault(metric_name, {})
+                    result[metric_name][year] = (value, unit, aliases[0])
+                break
+
+    return result
+
+
+def _extract_metric_by_year_from_text(
+    text: str,
+    aliases: List[str],
+    year: int,
+    value_type: str
+) -> Tuple[Optional[float], Optional[str], Optional[str]]:
+    """
+    从文本中按年份提取指标（行级别匹配）
+    """
+    if not text or not year:
+        return None, None, None
+
+    import re
+
+    unit_pattern = r'(万亿|千亿|百万元|千万元|亿元|亿|万元|万|元|%|倍|次)?'
+    year_str = str(year)
+    lines = text.splitlines()
+
+    def parse_value(value_str: str, unit: Optional[str]) -> Optional[float]:
+        value_str = value_str.replace(',', '').replace('，', '').strip()
+        try:
+            value = float(value_str)
+        except (ValueError, TypeError):
+            return None
+        if value_type == "percent":
+            if unit == '%' or (unit is None and 0 <= value <= 100):
+                return value
+            return None
+        if value_type == "ratio":
+            return value if value > 0 else None
+        # amount
+        if unit == '%':
+            return None
+        return value
+
+    for alias in aliases:
+        alias_pattern = re.escape(alias)
+        for line in lines:
+            if alias not in line or year_str not in line:
+                continue
+            # 年份在后
+            pattern_after = rf'{alias_pattern}.*?{year_str}[^\d%]{{0,6}}([\d,\.]+)\s*{unit_pattern}'
+            match = re.search(pattern_after, line)
+            if match:
+                value = parse_value(match.group(1), match.group(2))
+                if value is not None:
+                    return value, match.group(2) or None, alias
+            # 年份在前
+            pattern_before = rf'{year_str}.*?{alias_pattern}[^\d%]{{0,6}}([\d,\.]+)\s*{unit_pattern}'
+            match = re.search(pattern_before, line)
+            if match:
+                value = parse_value(match.group(1), match.group(2))
+                if value is not None:
+                    return value, match.group(2) or None, alias
+
+    return None, None, None
+
+
+def _extract_two_year_values_from_text(
+    text: str,
+    aliases: List[str],
+    value_type: str
+) -> Tuple[Optional[float], Optional[float], Optional[str], Optional[str]]:
+    """
+    在同一行中提取两个年份的数值（按出现顺序）
+    返回: (current_value, previous_value, unit, source)
+    """
+    if not text:
+        return None, None, None, None
+
+    import re
+
+    unit_pattern = r'(万亿|千亿|百万元|千万元|亿元|亿|万元|万|元|%|倍|次)?'
+
+    def parse_value(value_str: str, unit: Optional[str]) -> Optional[float]:
+        value_str = value_str.replace(',', '').replace('，', '').strip()
+        try:
+            value = float(value_str)
+        except (ValueError, TypeError):
+            return None
+        if value_type == "percent":
+            if unit == '%' or (unit is None and 0 <= value <= 100):
+                return value
+            return None
+        if value_type == "ratio":
+            return value if value > 0 else None
+        if unit == '%':
+            return None
+        return value
+
+    lines = text.splitlines()
+    for alias in aliases:
+        alias_pattern = re.escape(alias)
+        for line in lines:
+            if alias not in line:
+                continue
+            # 提取该行上的两个数值
+            matches = re.findall(rf'([\d,\.]+)\s*{unit_pattern}', line)
+            values = []
+            unit_found = None
+            for match in matches:
+                value_str = match[0]
+                unit = match[1] or None
+                parsed = parse_value(value_str, unit)
+                if parsed is None:
+                    continue
+                # 排除年份
+                if 2000 <= abs(parsed) <= 2030:
+                    continue
+                values.append(parsed)
+                if unit_found is None and unit:
+                    unit_found = unit
+            if len(values) >= 2:
+                return values[0], values[1], unit_found, alias
+    return None, None, None, None
+
+
 def _build_structured_metrics_json(
     query_engine,
     context_text: str,
@@ -816,6 +1036,11 @@ def _build_structured_metrics_json(
     except (ValueError, TypeError):
         year_value = None
 
+    prev_year_value = year_value - 1 if year_value else None
+    years_to_fetch = [year_value]
+    if prev_year_value:
+        years_to_fetch.append(prev_year_value)
+
     seed_key_map = {
         "ROE": "加权平均净资产收益率",
         "ROA": "总资产收益率",
@@ -825,73 +1050,127 @@ def _build_structured_metrics_json(
         "Equity": "股东权益"
     }
 
-    for metric_def in metric_defs:
-        query_aliases = "、".join(metric_def["aliases"])
-        query = f"{company_name}{year}年 {query_aliases} 的披露数值是多少？请给出数值和单位"
-        response = query_engine.query(query)
-        response_text = str(response)
-        search_text = f"{response_text}\n{context_text}"
-        value, source, unit = _extract_metric_from_text(
-            search_text, metric_def["aliases"], metric_def["type"]
-        )
-        if value is None:
-            fallback_data = parse_financial_data_response_enhanced(response_text, context_text)
-            if metric_def["metric"] == "ROE":
-                value = fallback_data.get("加权平均净资产收益率")
-                unit = "%" if value is not None else unit
-                source = "加权平均净资产收益率" if value is not None else source
-            elif metric_def["metric"] == "ROA":
-                value = fallback_data.get("总资产收益率")
-                unit = "%" if value is not None else unit
-                source = "平均总资产收益率" if value is not None else source
-            elif metric_def["metric"] == "NetProfit":
-                value = fallback_data.get("净利润")
-                unit = "元" if value is not None else unit
-                source = "归属于母公司股东的净利润" if value is not None else source
-            elif metric_def["metric"] == "Revenue":
-                value = fallback_data.get("营业收入")
-                unit = "元" if value is not None else unit
-                source = "营业收入" if value is not None else source
-            elif metric_def["metric"] == "TotalAssets":
-                value = fallback_data.get("总资产")
-                unit = "元" if value is not None else unit
-                source = "资产总额" if value is not None else source
-            elif metric_def["metric"] == "Equity":
-                value = fallback_data.get("股东权益")
-                unit = "元" if value is not None else unit
-                source = "股东权益" if value is not None else source
-        if value is None:
-            seed_key = seed_key_map.get(metric_def["metric"])
-            if seed_key and seed_key in seed_data:
-                value = seed_data.get(seed_key)
-                source = metric_def["aliases"][0]
-                unit = "%" if metric_def["type"] == "percent" else "元"
-        if value is not None:
-            metrics.append({
-                "metric": metric_def["metric"],
-                "year": year_value,
-                "value": value,
-                "unit": unit,
-                "source": source or metric_def["aliases"][0],
-                "yoy": None
-            })
+    table_metric_values = _extract_yeared_metrics_from_table(context_text, metric_defs)
+
+    for target_year in years_to_fetch:
+        year_text = f"{target_year}年" if target_year else f"{year}年"
+        for metric_def in metric_defs:
+            if any(m.get("metric") == metric_def["metric"] and m.get("year") == target_year for m in metrics):
+                continue
+            table_year_value = table_metric_values.get(metric_def["metric"], {}).get(target_year)
+            if table_year_value:
+                value, unit, source = table_year_value
+                metrics.append({
+                    "metric": metric_def["metric"],
+                    "year": target_year,
+                    "value": value,
+                    "unit": unit,
+                    "source": source or metric_def["aliases"][0],
+                    "yoy": None
+                })
+                continue
+            text_year_value = _extract_metric_by_year_from_text(
+                context_text,
+                metric_def["aliases"],
+                target_year,
+                metric_def["type"]
+            )
+            if text_year_value and text_year_value[0] is not None:
+                value, unit, source = text_year_value
+                metrics.append({
+                    "metric": metric_def["metric"],
+                    "year": target_year,
+                    "value": value,
+                    "unit": unit,
+                    "source": source or metric_def["aliases"][0],
+                    "yoy": None
+                })
+                continue
+            query_aliases = "、".join(metric_def["aliases"])
+            query = f"{company_name}{year_text} {query_aliases} 的披露数值是多少？请给出数值和单位"
+            response = query_engine.query(query)
+            response_text = str(response)
+            search_text = f"{response_text}\n{context_text}"
+            value, source, unit = _extract_metric_from_text(
+                search_text, metric_def["aliases"], metric_def["type"]
+            )
+            if value is None:
+                fallback_data = parse_financial_data_response_enhanced(response_text, context_text)
+                if metric_def["metric"] == "ROE":
+                    value = fallback_data.get("加权平均净资产收益率")
+                    unit = "%" if value is not None else unit
+                    source = "加权平均净资产收益率" if value is not None else source
+                elif metric_def["metric"] == "ROA":
+                    value = fallback_data.get("总资产收益率")
+                    unit = "%" if value is not None else unit
+                    source = "平均总资产收益率" if value is not None else source
+                elif metric_def["metric"] == "NetProfit":
+                    value = fallback_data.get("净利润")
+                    unit = "元" if value is not None else unit
+                    source = "归属于母公司股东的净利润" if value is not None else source
+                elif metric_def["metric"] == "Revenue":
+                    value = fallback_data.get("营业收入")
+                    unit = "元" if value is not None else unit
+                    source = "营业收入" if value is not None else source
+                elif metric_def["metric"] == "TotalAssets":
+                    value = fallback_data.get("总资产")
+                    unit = "元" if value is not None else unit
+                    source = "资产总额" if value is not None else source
+                elif metric_def["metric"] == "Equity":
+                    value = fallback_data.get("股东权益")
+                    unit = "元" if value is not None else unit
+                    source = "股东权益" if value is not None else source
+            if value is None and target_year == year_value:
+                seed_key = seed_key_map.get(metric_def["metric"])
+                if seed_key and seed_key in seed_data:
+                    value = seed_data.get(seed_key)
+                    source = metric_def["aliases"][0]
+                    unit = "%" if metric_def["type"] == "percent" else "元"
+            if value is not None:
+                metrics.append({
+                    "metric": metric_def["metric"],
+                    "year": target_year,
+                    "value": value,
+                    "unit": unit,
+                    "source": source or metric_def["aliases"][0],
+                    "yoy": None
+                })
+
+    # 额外补充：同一行包含两年数值的情况（优先补前一年）
+    if year_value and prev_year_value:
+        for metric_def in metric_defs:
+            if metric_def["type"] == "percent":
+                continue
+            has_prev = any(m.get("metric") == metric_def["metric"] and m.get("year") == prev_year_value for m in metrics)
+            has_curr = any(m.get("metric") == metric_def["metric"] and m.get("year") == year_value for m in metrics)
+            if has_prev:
+                continue
+            cur_val, prev_val, unit, source = _extract_two_year_values_from_text(
+                context_text,
+                metric_def["aliases"],
+                metric_def["type"]
+            )
+            if prev_val is not None:
+                metrics.append({
+                    "metric": metric_def["metric"],
+                    "year": prev_year_value,
+                    "value": prev_val,
+                    "unit": unit or ("元" if metric_def["type"] == "amount" else None),
+                    "source": source or metric_def["aliases"][0],
+                    "yoy": None
+                })
+            if not has_curr and cur_val is not None:
+                metrics.append({
+                    "metric": metric_def["metric"],
+                    "year": year_value,
+                    "value": cur_val,
+                    "unit": unit or ("元" if metric_def["type"] == "amount" else None),
+                    "source": source or metric_def["aliases"][0],
+                    "yoy": None
+                })
 
     # 第二步：结构化JSON输出（仅披露指标）
     print(json.dumps({"metrics": metrics}, ensure_ascii=False))
-
-    # 保存为JSON文件
-    try:
-        safe_company = re.sub(r'[^\w\u4e00-\u9fff\-]+', '_', company_name or 'unknown')
-        safe_year = re.sub(r'[^\d]+', '', str(year or ''))
-        filename = f"dupont_metrics_{safe_company}_{safe_year or 'unknown'}.json"
-        output_dir = Path(__file__).parent.parent / "storage"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / filename
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump({"metrics": metrics}, f, ensure_ascii=False, indent=2)
-        logger.info(f"结构化指标JSON已保存: {output_path}")
-    except Exception as e:
-        logger.warning(f"保存结构化指标JSON失败: {str(e)}")
 
     def _to_yuan(value: Optional[float], unit: Optional[str]) -> Optional[float]:
         if value is None:
@@ -911,57 +1190,315 @@ def _build_structured_metrics_json(
         return value * multiplier
 
     # 第三步：缺失指标计算（只计算规定指标）
-    metric_map = {m["metric"]: m for m in metrics}
-    net_profit = _to_yuan(metric_map.get("NetProfit", {}).get("value"), metric_map.get("NetProfit", {}).get("unit"))
-    revenue = _to_yuan(metric_map.get("Revenue", {}).get("value"), metric_map.get("Revenue", {}).get("unit"))
-    roe = metric_map.get("ROE", {}).get("value")
-    roa = metric_map.get("ROA", {}).get("value")
+    metric_map = {(m["metric"], m.get("year")): m for m in metrics}
+    for target_year in years_to_fetch:
+        net_profit = _to_yuan(
+            metric_map.get(("NetProfit", target_year), {}).get("value"),
+            metric_map.get(("NetProfit", target_year), {}).get("unit")
+        )
+        revenue = _to_yuan(
+            metric_map.get(("Revenue", target_year), {}).get("value"),
+            metric_map.get(("Revenue", target_year), {}).get("unit")
+        )
+        roe = metric_map.get(("ROE", target_year), {}).get("value")
+        roa = metric_map.get(("ROA", target_year), {}).get("value")
 
-    # 净利率
-    if net_profit is not None and revenue:
-        metrics.append({
-            "metric": "NetProfitMargin",
-            "year": year_value,
-            "value": (net_profit / revenue) * 100,
-            "unit": "%",
-            "source": "净利润/营业收入",
-            "yoy": None,
-            "derived": True,
-            "formula": "净利率 = 净利润 / 营业收入"
-        })
+        # 净利率
+        if net_profit is not None and revenue:
+            metrics.append({
+                "metric": "NetProfitMargin",
+                "year": target_year,
+                "value": (net_profit / revenue) * 100,
+                "unit": "%",
+                "source": "净利润/营业收入",
+                "yoy": None,
+                "derived": True,
+                "formula": "净利率 = 净利润 / 营业收入"
+            })
 
-    # 权益乘数
-    if roe is not None and roa:
-        metrics.append({
-            "metric": "EquityMultiplier",
-            "year": year_value,
-            "value": roe / roa,
-            "unit": "times",
-            "source": "ROE/ROA",
-            "yoy": None,
-            "derived": True,
-            "formula": "权益乘数 = ROE / ROA"
-        })
+        # 权益乘数
+        if roe is not None and roa:
+            metrics.append({
+                "metric": "EquityMultiplier",
+                "year": target_year,
+                "value": roe / roa,
+                "unit": "times",
+                "source": "ROE/ROA",
+                "yoy": None,
+                "derived": True,
+                "formula": "权益乘数 = ROE / ROA"
+            })
 
-    # 资产周转率
-    net_profit_margin = None
-    for m in metrics:
-        if m.get("metric") == "NetProfitMargin":
-            net_profit_margin = m.get("value")
-            break
-    if roa is not None and net_profit_margin:
-        metrics.append({
-            "metric": "AssetTurnover",
-            "year": year_value,
-            "value": roa / net_profit_margin,
-            "unit": "times",
-            "source": "ROA/净利率",
-            "yoy": None,
-            "derived": True,
-            "formula": "资产周转率 = ROA / 净利率"
-        })
+        # 资产周转率
+        net_profit_margin = None
+        for m in metrics:
+            if m.get("metric") == "NetProfitMargin" and m.get("year") == target_year:
+                net_profit_margin = m.get("value")
+                break
+        if roa is not None and net_profit_margin:
+            metrics.append({
+                "metric": "AssetTurnover",
+                "year": target_year,
+                "value": roa / net_profit_margin,
+                "unit": "times",
+                "source": "ROA/净利率",
+                "yoy": None,
+                "derived": True,
+                "formula": "资产周转率 = ROA / 净利率"
+            })
+
+    # 保存为JSON文件（含派生指标）
+    try:
+        safe_company = re.sub(r'[^\w\u4e00-\u9fff\-]+', '_', company_name or 'unknown')
+        safe_year = re.sub(r'[^\d]+', '', str(year or ''))
+        filename = f"dupont_metrics_{safe_company}_{safe_year or 'unknown'}.json"
+        output_dir = Path(__file__).parent.parent / "storage"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / filename
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump({"metrics": metrics}, f, ensure_ascii=False, indent=2)
+        logger.info(f"结构化指标JSON已保存: {output_path}")
+    except Exception as e:
+        logger.warning(f"保存结构化指标JSON失败: {str(e)}")
 
     return {"metrics": metrics}
+
+
+def _build_analysis_by_year(
+    structured_metrics: Dict[str, Any],
+    company_name: str
+) -> Dict[str, Any]:
+    """
+    基于结构化指标构建按年份的杜邦分析数据（用于前端切换）
+    """
+    metrics = structured_metrics.get("metrics") or []
+    if not metrics:
+        return {}
+
+    def get_metric(metrics_list, metric_name, year):
+        for item in metrics_list:
+            if item.get("metric") == metric_name and item.get("year") == year:
+                return item
+        return None
+
+    def format_value(value, unit):
+        if value is None:
+            return "—"
+        if unit == "%":
+            return f"{value:.2f}%"
+        if unit == "times":
+            return f"{value:.2f}"
+        if unit:
+            return f"{value:.2f}{unit}"
+        return f"{value:.2f}"
+
+    years = sorted({m.get("year") for m in metrics if m.get("year")}, reverse=True)
+    analysis_by_year = {}
+
+    for year in years:
+        roe = get_metric(metrics, "ROE", year)
+        roa = get_metric(metrics, "ROA", year)
+        net_profit = get_metric(metrics, "NetProfit", year)
+        revenue = get_metric(metrics, "Revenue", year)
+        total_assets = get_metric(metrics, "TotalAssets", year)
+        equity = get_metric(metrics, "Equity", year)
+        net_profit_margin = get_metric(metrics, "NetProfitMargin", year)
+        asset_turnover = get_metric(metrics, "AssetTurnover", year)
+        equity_multiplier = get_metric(metrics, "EquityMultiplier", year)
+
+        level1 = {
+            "roe": {
+                "name": "净资产收益率",
+                "value": roe.get("value") if roe else None,
+                "formatted_value": format_value(roe.get("value"), roe.get("unit")) if roe else "—",
+                "level": 1,
+                "formula": "ROE = 加权平均净资产收益率（年报披露）",
+                "unit": "%"
+            },
+            "roa": {
+                "name": "资产净利率",
+                "value": roa.get("value") if roa else None,
+                "formatted_value": format_value(roa.get("value"), roa.get("unit")) if roa else "—",
+                "level": 1,
+                "formula": "总资产收益率（年报披露）",
+                "unit": "%"
+            },
+            "equity_multiplier": {
+                "name": "权益乘数",
+                "value": equity_multiplier.get("value") if equity_multiplier else None,
+                "formatted_value": format_value(equity_multiplier.get("value"), "times") if equity_multiplier else "—",
+                "level": 1,
+                "formula": "权益乘数 = ROE / ROA",
+                "unit": "倍"
+            }
+        }
+
+        level2 = {
+            "net_profit_margin": {
+                "name": "营业净利润率",
+                "value": net_profit_margin.get("value") if net_profit_margin else None,
+                "formatted_value": format_value(net_profit_margin.get("value"), "%") if net_profit_margin else "—",
+                "level": 2,
+                "formula": "净利率 = 净利润 / 营业收入",
+                "unit": "%"
+            },
+            "asset_turnover": {
+                "name": "资产周转率",
+                "value": asset_turnover.get("value") if asset_turnover else None,
+                "formatted_value": format_value(asset_turnover.get("value"), "times") if asset_turnover else "—",
+                "level": 2,
+                "formula": "资产周转率 = ROA / 净利率",
+                "unit": "倍"
+            },
+            "total_assets": {
+                "name": "总资产",
+                "value": total_assets.get("value") if total_assets else None,
+                "formatted_value": format_value(total_assets.get("value"), total_assets.get("unit") if total_assets else None) if total_assets else "—",
+                "level": 2,
+                "formula": "总资产",
+                "unit": "元"
+            },
+            "shareholders_equity": {
+                "name": "股东权益",
+                "value": equity.get("value") if equity else None,
+                "formatted_value": format_value(equity.get("value"), equity.get("unit") if equity else None) if equity else "—",
+                "level": 2,
+                "formula": "股东权益",
+                "unit": "元"
+            }
+        }
+
+        level3 = {
+            "net_income": {
+                "name": "净利润",
+                "value": net_profit.get("value") if net_profit else None,
+                "formatted_value": format_value(net_profit.get("value"), net_profit.get("unit") if net_profit else None) if net_profit else "—",
+                "level": 3,
+                "formula": "净利润",
+                "unit": "元"
+            },
+            "revenue": {
+                "name": "营业收入",
+                "value": revenue.get("value") if revenue else None,
+                "formatted_value": format_value(revenue.get("value"), revenue.get("unit") if revenue else None) if revenue else "—",
+                "level": 3,
+                "formula": "营业收入",
+                "unit": "元"
+            },
+            "current_assets": {
+                "name": "流动资产",
+                "value": None,
+                "formatted_value": "—",
+                "level": 3,
+                "formula": "流动资产",
+                "unit": "元"
+            },
+            "non_current_assets": {
+                "name": "非流动资产",
+                "value": None,
+                "formatted_value": "—",
+                "level": 3,
+                "formula": "非流动资产",
+                "unit": "元"
+            }
+        }
+
+        tree_structure = {
+            "id": "roe",
+            "name": "净资产收益率",
+            "value": level1["roe"]["value"],
+            "formatted_value": level1["roe"]["formatted_value"],
+            "level": 1,
+            "formula": level1["roe"]["formula"],
+            "children": [
+                {
+                    "id": "roa",
+                    "name": "资产净利率",
+                    "value": level1["roa"]["value"],
+                    "formatted_value": level1["roa"]["formatted_value"],
+                    "level": 1,
+                    "formula": level1["roa"]["formula"],
+                    "children": [
+                        {
+                            "id": "net_profit_margin",
+                            "name": "营业净利润率",
+                            "value": level2["net_profit_margin"]["value"],
+                            "formatted_value": level2["net_profit_margin"]["formatted_value"],
+                            "level": 2,
+                            "formula": level2["net_profit_margin"]["formula"],
+                            "children": [
+                                {
+                                    "id": "net_income",
+                                    "name": "净利润",
+                                    "value": level3["net_income"]["value"],
+                                    "formatted_value": level3["net_income"]["formatted_value"],
+                                    "level": 3,
+                                    "formula": level3["net_income"]["formula"],
+                                    "children": []
+                                },
+                                {
+                                    "id": "revenue",
+                                    "name": "营业收入",
+                                    "value": level3["revenue"]["value"],
+                                    "formatted_value": level3["revenue"]["formatted_value"],
+                                    "level": 3,
+                                    "formula": level3["revenue"]["formula"],
+                                    "children": []
+                                }
+                            ]
+                        },
+                        {
+                            "id": "asset_turnover",
+                            "name": "资产周转率",
+                            "value": level2["asset_turnover"]["value"],
+                            "formatted_value": level2["asset_turnover"]["formatted_value"],
+                            "level": 2,
+                            "formula": level2["asset_turnover"]["formula"],
+                            "children": []
+                        }
+                    ]
+                },
+                {
+                    "id": "equity_multiplier",
+                    "name": "权益乘数",
+                    "value": level1["equity_multiplier"]["value"],
+                    "formatted_value": level1["equity_multiplier"]["formatted_value"],
+                    "level": 1,
+                    "formula": level1["equity_multiplier"]["formula"],
+                    "children": [
+                        {
+                            "id": "total_assets",
+                            "name": "总资产",
+                            "value": level2["total_assets"]["value"],
+                            "formatted_value": level2["total_assets"]["formatted_value"],
+                            "level": 2,
+                            "formula": level2["total_assets"]["formula"],
+                            "children": []
+                        },
+                        {
+                            "id": "shareholders_equity",
+                            "name": "股东权益",
+                            "value": level2["shareholders_equity"]["value"],
+                            "formatted_value": level2["shareholders_equity"]["formatted_value"],
+                            "level": 2,
+                            "formula": level2["shareholders_equity"]["formula"],
+                            "children": []
+                        }
+                    ]
+                }
+            ]
+        }
+
+        analysis_by_year[str(year)] = {
+            "company_name": company_name,
+            "report_year": str(year),
+            "level1": level1,
+            "level2": level2,
+            "level3": level3,
+            "tree_structure": tree_structure
+        }
+
+    return analysis_by_year
 
 
 def validate_and_complement_financial_data(

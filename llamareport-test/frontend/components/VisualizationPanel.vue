@@ -32,7 +32,15 @@
               </div>
               <div class="viz-card-header-right">
                 <div v-if="dupontData.full_data" class="viz-card-meta">
-                  <span>{{ dupontData.full_data.report_year || '未知年份' }}</span>
+                  <select
+                    v-if="dupontYears.length > 1"
+                    v-model="selectedDupontYear"
+                    class="dupont-year-select"
+                    title="切换年份"
+                  >
+                    <option v-for="year in dupontYears" :key="year" :value="year">{{ year }}</option>
+                  </select>
+                  <span v-else>{{ selectedDupontYear || dupontData.full_data.report_year || '未知年份' }}</span>
                 </div>
                 <div class="viz-card-actions">
                   <button class="viz-card-close" @click="removeDupontCard" title="删除">×</button>
@@ -41,10 +49,10 @@
             </div>
             <div class="viz-card-content">
               <!-- 树状结构视图 -->
-              <div v-if="dupontData.full_data && dupontData.full_data.tree_structure" class="dupont-tree-view-enhanced">
+              <div v-if="dupontTreeData" class="dupont-tree-view-enhanced">
                 <div class="dupont-diagram-container">
-                  <svg class="dupont-connectors" v-if="dupontData.full_data.tree_structure"></svg>
-                  <DupontTreeNodeEnhanced :node="dupontData.full_data.tree_structure" :level="1" />
+                  <svg class="dupont-connectors" v-if="dupontTreeData"></svg>
+                  <DupontTreeNodeEnhanced :node="dupontTreeData" :level="1" />
                 </div>
               </div>
               <!-- 层级视图 -->
@@ -126,7 +134,7 @@
           
           <!-- 普通查询可视化卡片列表（排除杜邦分析类型，因为杜邦分析通过dupontData显示） -->
           <div 
-            v-for="card in visualizationCards.filter(c => c.type !== 'dupont')" 
+            v-for="card in displayCards" 
             :key="card.id" 
             class="viz-card chart-card"
             :class="{ 'selected': isCardSelected(card.id), 'selectable': selectionMode }"
@@ -138,7 +146,7 @@
                   {{ isCardSelected(card.id) ? '✓' : '' }}
                 </span>
                 <span class="viz-card-icon">📊</span>
-                <h3>{{ card.question || '数据可视化' }}</h3>
+                <h3>{{ formatCardTitle(card.question || '数据可视化') }}</h3>
               </div>
               <div class="viz-card-actions">
                 <button class="viz-card-close" @click.stop="removeCard(card.id, $event)" title="删除">×</button>
@@ -147,7 +155,7 @@
             <div class="viz-card-content">
               <div v-if="card.data && card.data.has_visualization" class="chart-card-content">
                 <!-- 财务表格 -->
-                <div v-if="card.type === 'financial_table' && card.data.table" class="table-container">
+                <div v-if="card.type === 'financial_table' && card.data.table" class="table-container" :class="{ 'table-container--auto': isKeyMetricsTable(card.data.table) }">
                   <table class="financial-table">
                     <thead>
                       <tr>
@@ -358,7 +366,8 @@ export default {
     return {
       selectionMode: false,
       selectedCards: [],
-      generatingAnalysis: false
+      generatingAnalysis: false,
+      selectedDupontYear: null
     }
   },
   computed: {
@@ -370,7 +379,16 @@ export default {
     hasAnyVisualization() {
       return (this.chartData && this.chartData.has_visualization) || 
              (this.dupontData && (this.dupontData.full_data || this.dupontData.roe)) ||
-             (this.visualizationCards && this.visualizationCards.length > 0);
+             (this.displayCards && this.displayCards.length > 0);
+    },
+    displayCards() {
+      if (!Array.isArray(this.visualizationCards)) return [];
+      return this.visualizationCards.filter(card => {
+        if (!card || card.type === 'dupont') return false;
+        if (card.type !== 'financial_table') return true;
+        const title = card.data?.table?.title || card.question || '';
+        return !this.isHiddenBusinessMetricTable(title);
+      });
     },
     hasInsights() {
       return this.chartData?.insights && this.chartData.insights.length > 0;
@@ -380,9 +398,169 @@ export default {
     },
     confidenceScore() {
       return this.chartData?.confidence_score || 0;
+    },
+    dupontYears() {
+      const metrics = this.dupontData?.metrics_json?.metrics || [];
+      const years = [...new Set(metrics.map(m => m.year).filter(Boolean))];
+      return years.sort((a, b) => b - a);
+    },
+    dupontTreeData() {
+      if (!this.dupontData) return null;
+      const metrics = this.dupontData.metrics_json?.metrics || [];
+      if (metrics.length === 0) {
+        return this.dupontData.full_data?.tree_structure || null;
+      }
+      const year = this.selectedDupontYear || this.dupontData.full_data?.report_year || this.dupontYears[0];
+      return this.buildDupontTreeFromMetrics(metrics, year);
+    }
+  },
+  watch: {
+    dupontData: {
+      immediate: true,
+      handler() {
+        if (this.dupontYears.length > 0) {
+          const preferredYear = Number(this.dupontData?.full_data?.report_year);
+          if (preferredYear && this.dupontYears.includes(preferredYear)) {
+            this.selectedDupontYear = preferredYear;
+          } else {
+            this.selectedDupontYear = this.dupontYears[0];
+          }
+        }
+      }
     }
   },
   methods: {
+    formatCardTitle(title) {
+      return String(title || '')
+        .replace(/[`*_]+/g, '')
+        .replace(/^#{1,6}\s*/g, '')
+        .replace(/^[一二三四五六七八九十]+[、.]\s*/g, '')
+        .replace(/^\d+\.\s*/g, '')
+        .replace(/[|]/g, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+    },
+    isKeyMetricsTable(table) {
+      const title = table?.title || ''
+      return String(title).includes('关键业务指标')
+    },
+    isHiddenBusinessMetricTable(title = '') {
+      const hiddenTitles = ['零售银行业务指标', '对公银行业务指标', '同业与资金业务指标'];
+      const text = String(title || '');
+      return hiddenTitles.some(item => text.includes(item));
+    },
+    buildDupontTreeFromMetrics(metrics, year) {
+      const getMetric = (metricKey) => {
+        return metrics.find(m => m.metric === metricKey && m.year === year) || null;
+      };
+      const formatPercent = (metric) => {
+        if (!metric || metric.value === null || metric.value === undefined) return '—';
+        const num = Number(metric.value);
+        if (!Number.isFinite(num)) return '—';
+        return `${num.toFixed(2)}%`;
+      };
+      const formatTimes = (metric) => {
+        if (!metric || metric.value === null || metric.value === undefined) return '—';
+        const num = Number(metric.value);
+        if (!Number.isFinite(num)) return '—';
+        return num.toFixed(2);
+      };
+      const formatAmount = (metric) => {
+        if (!metric || metric.value === null || metric.value === undefined) return '—';
+        const num = Number(metric.value);
+        if (!Number.isFinite(num)) return '—';
+        const display = Number.isInteger(num) ? String(num) : num.toFixed(2);
+        return `${display}${metric.unit || ''}`;
+      };
+
+      const roe = getMetric('ROE');
+      const roa = getMetric('ROA');
+      const netProfit = getMetric('NetProfit');
+      const revenue = getMetric('Revenue');
+      const totalAssets = getMetric('TotalAssets');
+      const equity = getMetric('Equity');
+      const netProfitMargin = getMetric('NetProfitMargin');
+      const assetTurnover = getMetric('AssetTurnover');
+      const equityMultiplier = getMetric('EquityMultiplier');
+
+      return {
+        id: 'roe',
+        name: '净资产收益率',
+        formatted_value: formatPercent(roe),
+        value: roe?.value ?? null,
+        level: 1,
+        children: [
+          {
+            id: 'roa',
+            name: '资产净利率',
+            formatted_value: formatPercent(roa),
+            value: roa?.value ?? null,
+            level: 1,
+            children: [
+              {
+                id: 'net_profit_margin',
+                name: '营业净利润率',
+                formatted_value: formatPercent(netProfitMargin),
+                value: netProfitMargin?.value ?? null,
+                level: 2,
+                children: [
+                  {
+                    id: 'net_income',
+                    name: '净利润',
+                    formatted_value: formatAmount(netProfit),
+                    value: netProfit?.value ?? null,
+                    level: 3,
+                    children: []
+                  },
+                  {
+                    id: 'revenue',
+                    name: '营业收入',
+                    formatted_value: formatAmount(revenue),
+                    value: revenue?.value ?? null,
+                    level: 3,
+                    children: []
+                  }
+                ]
+              },
+              {
+                id: 'asset_turnover',
+                name: '资产周转率',
+                formatted_value: formatTimes(assetTurnover),
+                value: assetTurnover?.value ?? null,
+                level: 2,
+                children: []
+              }
+            ]
+          },
+          {
+            id: 'equity_multiplier',
+            name: '权益乘数',
+            formatted_value: formatTimes(equityMultiplier),
+            value: equityMultiplier?.value ?? null,
+            level: 1,
+            children: [
+              {
+                id: 'total_assets',
+                name: '总资产',
+                formatted_value: formatAmount(totalAssets),
+                value: totalAssets?.value ?? null,
+                level: 2,
+                children: []
+              },
+              {
+                id: 'shareholders_equity',
+                name: '股东权益',
+                formatted_value: formatAmount(equity),
+                value: equity?.value ?? null,
+                level: 2,
+                children: []
+              }
+            ]
+          }
+        ],
+        formula: 'ROE = ROA × 权益乘数'
+      };
+    },
     removeCard(cardId, event) {
       // 阻止事件冒泡，确保不会触发卡片选择
       if (event) {
@@ -806,7 +984,7 @@ export default {
       metricKeywords.forEach((keyword) => {
         result = result.replaceAll(keyword, `<span class="insight-key">${keyword}</span>`)
       })
-      result = result.replace(/(-?\d{1,3}(?:,\d{3})*(?:\.\d+)?%?|-?\d+(?:\.\d+)?%?)(万亿元|亿元|万元|元)?/g, (match) => {
+      result = result.replace(/(-?\d{4,}(?:\.\d+)?%?|-?\d{1,3}(?:,\d{3})+(?:\.\d+)?%?|-?\d{1,3}(?:\.\d+)?%?)(万亿元|亿元|万元|元)?/g, (match) => {
         return `<span class="insight-num">${match}</span>`
       })
       result = result.replace(/(增长|上升|提升|扩大|改善|增加|上行|回升)/g, '<span class="insight-up">$1</span>')
